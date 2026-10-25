@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  Suspense,
   type ReactNode,
 } from "react";
 import { APP_NAME, BRAND_ASSETS } from "@/lib/brand";
@@ -78,7 +79,6 @@ function writeFlag(key: string, value: boolean) {
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const supabase = createClient();
   const router = useRouter();
-  const pathname = usePathname();
 
   const [unread, setUnread] = useState({ total: 0, conversations: 0 });
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>("connecting");
@@ -142,7 +142,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         typeof Notification !== "undefined" &&
         Notification.permission === "granted"
       ) {
-        const title = conv.contacts?.name || `+${conv.contacts?.wa_id ?? ""}`;
+        const title = conv.contacts?.name || (conv.contacts?.wa_id ? `+${conv.contacts.wa_id}` : "Contacto");
         const body = message.body ?? `[${message.type}]`;
         const n = new Notification(title, { body: body.slice(0, 140), tag: conv.id, icon: BRAND_ASSETS.icon192 });
         n.onclick = () => {
@@ -207,13 +207,6 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     };
   }, [supabase, fetchUnread, notify]);
 
-  // Contador en el título: "(3) Contactos · LG Blocks CRM". Se reaplica al
-  // navegar porque Next cambia el título de cada página.
-  useEffect(() => {
-    const base = document.title.replace(/^\(\d+\+?\)\s*/, "") || APP_NAME;
-    document.title = unread.total > 0 ? `(${unread.total > 99 ? "99+" : unread.total}) ${base}` : base;
-  }, [unread.total, pathname]);
-
   const value = useMemo<NotificationsContextValue>(
     () => ({
       unreadTotal: unread.total,
@@ -250,7 +243,28 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     [unread, realtimeStatus, soundEnabled, desktopEnabled, permission],
   );
 
-  return <NotificationsContext value={value}>{children}</NotificationsContext>;
+  return (
+    <NotificationsContext value={value}>
+      {children}
+      {/* usePathname es dato de petición en rutas con [id]: va en su propio Suspense */}
+      <Suspense fallback={null}>
+        <TitleCounter total={unread.total} />
+      </Suspense>
+    </NotificationsContext>
+  );
+}
+
+/**
+ * Contador en el título: "(3) Contactos · LG Blocks CRM". Se reaplica al
+ * navegar porque Next cambia el título de cada página.
+ */
+function TitleCounter({ total }: { total: number }) {
+  const pathname = usePathname();
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\+?\)\s*/, "") || APP_NAME;
+    document.title = total > 0 ? `(${total > 99 ? "99+" : total}) ${base}` : base;
+  }, [total, pathname]);
+  return null;
 }
 
 export function useNotifications(): NotificationsContextValue {

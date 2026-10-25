@@ -40,6 +40,34 @@ export function isConversationStatus(value: string): value is ConversationStatus
   return (CONVERSATION_STATUSES as readonly string[]).includes(value);
 }
 
+// --- Clasificación (contactos y empresas) ------------------------------------
+
+export const CLASSIFICATIONS = ["unclassified", "prospect", "customer", "supplier"] as const;
+export type Classification = (typeof CLASSIFICATIONS)[number];
+
+export const CLASSIFICATION_LABELS: Record<Classification, string> = {
+  unclassified: "Sin clasificar",
+  prospect: "Prospecto",
+  customer: "Cliente",
+  supplier: "Proveedor",
+};
+
+export function isClassification(value: string | null | undefined): value is Classification {
+  return (CLASSIFICATIONS as readonly string[]).includes(value ?? "");
+}
+
+/** Origen del último cambio de clasificación. */
+export const CLASSIFICATION_SOURCE_LABELS: Record<string, string> = {
+  default: "Por defecto",
+  suggestion: "Sugerencia aceptada",
+  manual: "Manual",
+  order: "Por pedido",
+};
+
+export type ClassificationEntity = "contact" | "company";
+export type ClassificationHistoryEntry = Tables<"classification_history">;
+export type ClassificationSuggestion = Tables<"classification_suggestions">;
+
 // --- Campos personalizados (contacts.custom_fields) --------------------------
 
 export type CustomFields = Record<string, string>;

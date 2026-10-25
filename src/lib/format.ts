@@ -75,6 +75,31 @@ export function formatDate(iso: string): string {
   return shortDateFormat.format(new Date(iso));
 }
 
+const moneyFormat = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+
+/** "$1,234.50" (pesos mexicanos). Acepta los numeric de Postgres. */
+export function formatMoney(value: number | string | null | undefined): string {
+  const n = typeof value === "string" ? Number(value) : (value ?? 0);
+  return moneyFormat.format(Number.isFinite(n) ? n : 0);
+}
+
+const relativeFormat = new Intl.RelativeTimeFormat("es", { numeric: "auto" });
+
+/** "hace 3 días", "ayer", "hace 2 h"… para la última interacción. */
+export function formatRelative(iso: string | null | undefined, now: number): string {
+  if (!iso) return "—";
+  const diff = new Date(iso).getTime() - now;
+  const minutes = Math.round(diff / 60_000);
+  if (Math.abs(minutes) < 60) return relativeFormat.format(minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return relativeFormat.format(hours, "hour");
+  const days = Math.round(hours / 24);
+  if (Math.abs(days) < 30) return relativeFormat.format(days, "day");
+  const months = Math.round(days / 30);
+  if (Math.abs(months) < 12) return relativeFormat.format(months, "month");
+  return relativeFormat.format(Math.round(days / 365), "year");
+}
+
 /** "5 h 12 min" a partir de milisegundos. */
 export function formatDuration(ms: number): string {
   const totalMinutes = Math.floor(ms / 60_000);
@@ -94,8 +119,10 @@ export function formatRemaining(ms: number): string {
  * Teléfono legible SOLO para mostrar (contacts.wa_id no se modifica).
  * México (52 o 521 + 10 dígitos): "+52 644 407 5142". Cualquier otro: "+" + número.
  */
-export function formatPhone(waId: string): string {
+export function formatPhone(waId: string | null | undefined): string {
+  if (!waId) return "Sin teléfono";
   const digits = waId.replace(/\D/g, "");
+  if (!digits) return waId;
   const mx = /^521?(\d{3})(\d{3})(\d{4})$/.exec(digits);
   if (mx) return `+52 ${mx[1]} ${mx[2]} ${mx[3]}`;
   return `+${digits}`;

@@ -83,11 +83,16 @@ export async function POST(request: NextRequest) {
   const finalCaption = SEND_RULES[kind].caption && caption ? caption : null;
 
   // 6. Subir a Meta y enviar el mensaje (al número normalizado).
+  const waId = conversation.contacts.wa_id;
+  if (!waId) {
+    await removeUpload(path);
+    return fail(422, "Este contacto no tiene un número de WhatsApp vinculado");
+  }
   let waMessageId: string;
   let metaMediaId: string;
   try {
     metaMediaId = await uploadMediaToMeta(file, validation.mime, filename);
-    waMessageId = await sendMediaMessage(conversation.contacts.wa_id, kind, metaMediaId, {
+    waMessageId = await sendMediaMessage(waId, kind, metaMediaId, {
       caption: finalCaption,
       filename: kind === "document" ? filename : null,
     });

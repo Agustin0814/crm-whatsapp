@@ -22,6 +22,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { errorMessage } from "@/lib/crm/contacts";
 import { ROLE_LABELS, type Role } from "@/lib/crm/types";
 import { createClient } from "@/lib/supabase/client";
+import { RolesSettings } from "./roles-settings";
+import { SalesSettings } from "./sales-settings";
 import { SectionHeader } from "./section-header";
 import { UsersAdmin } from "./users-admin";
 
@@ -32,6 +34,8 @@ export const SETTINGS_TABS = [
   { value: "apariencia", label: "Apariencia", adminOnly: false },
   { value: "etiquetas", label: "Etiquetas", adminOnly: false },
   { value: "respuestas-rapidas", label: "Respuestas rápidas", adminOnly: false },
+  { value: "funciones", label: "Funciones", adminOnly: false },
+  { value: "contactos-ventas", label: "Contactos y ventas", adminOnly: false },
 ] as const;
 
 type TabValue = (typeof SETTINGS_TABS)[number]["value"];
@@ -68,7 +72,7 @@ export function SettingsView() {
       <PageHeader title="Configuración" description="Tu perfil, el equipo, las notificaciones y los catálogos del CRM." />
 
       <Tabs value={tab} onValueChange={changeTab} className="flex min-h-0 flex-1 flex-col gap-0">
-        <div className="overflow-x-auto border-b px-4 md:px-6">
+        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b px-4 md:px-6">
           <TabsList variant="line" className="h-11">
             {available.map((t) => (
               <TabsTrigger key={t.value} value={t.value} className="px-3">
@@ -107,6 +111,12 @@ export function SettingsView() {
             </TabsContent>
             <TabsContent value="respuestas-rapidas">
               <QuickRepliesView />
+            </TabsContent>
+            <TabsContent value="funciones">
+              <RolesSettings />
+            </TabsContent>
+            <TabsContent value="contactos-ventas">
+              <SalesSettings />
             </TabsContent>
           </div>
         </div>

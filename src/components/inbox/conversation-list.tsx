@@ -256,7 +256,7 @@ function ConversationRow({
 }) {
   const { profiles } = useCrm();
   const contact = item.contact;
-  const name = contact?.name || (contact ? formatPhone(contact.wa_id) : "Contacto");
+  const name = contact?.name || (contact ? formatPhone(contact.wa_id ?? contact.phone) : "Contacto");
   const unread = item.unread_count;
   const assignee = item.assigned_to ? profiles.find((p) => p.id === item.assigned_to) : null;
   const visibleTags = contact?.tags.slice(0, 2) ?? [];

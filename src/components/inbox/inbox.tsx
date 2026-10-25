@@ -13,7 +13,7 @@ import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { errorMessage, setContactTag } from "@/lib/crm/contacts";
+import { errorMessage, fetchContact, setContactTag } from "@/lib/crm/contacts";
 import {
   compareConversations,
   DEFAULT_FILTERS,
@@ -402,6 +402,12 @@ export function Inbox() {
     patchContact(contact.id, () => contact);
   }
 
+  function reloadContact(contactId: string) {
+    fetchContact(supabase, contactId)
+      .then(handleContactChange)
+      .catch(() => toast.error("No se pudo recargar el contacto"));
+  }
+
   function toggleDetails() {
     if (isXl) setPanelOpen((v) => !v);
     else setSheetOpen((v) => !v);
@@ -448,6 +454,7 @@ export function Inbox() {
             onToggleDetails={toggleDetails}
             onBack={() => selectConversation(null)}
             onSent={handleSent}
+            onReloadContact={() => selected.contact && reloadContact(selected.contact.id)}
             {...actionsFor(selected)}
           />
         ) : selectedId ? (

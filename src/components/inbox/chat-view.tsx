@@ -3,6 +3,7 @@
 import { ArrowLeftIcon, PanelRightCloseIcon, PanelRightOpenIcon, PinIcon } from "lucide-react";
 import { useRef, useState, type DragEvent } from "react";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
+import { OrderDialog } from "@/components/orders/order-dialog";
 import { profileName, useCrm } from "@/components/crm/crm-provider";
 import { StatusDot } from "@/components/crm/status-badge";
 import { TagChip } from "@/components/crm/tag-chip";
@@ -23,6 +24,7 @@ import { Composer, type ComposerHandle } from "./composer";
 import { ConversationActionsMenu, UNASSIGNED, type ConversationActionsHandlers } from "./conversation-actions";
 import { MessageList } from "./message-list";
 import { NotesPanel } from "./notes-panel";
+import { SuggestionBanner } from "./suggestion-banner";
 
 type Props = ConversationActionsHandlers & {
   conversation: ConversationItem;
@@ -33,6 +35,8 @@ type Props = ConversationActionsHandlers & {
   onToggleDetails: () => void;
   onBack: () => void;
   onSent: (message: Message) => void;
+  /** Recarga el contacto (p. ej. tras aceptar la sugerencia de prospecto). */
+  onReloadContact: () => void;
 };
 
 /**
@@ -49,20 +53,23 @@ export function ChatView({
   onToggleDetails,
   onBack,
   onSent,
+  onReloadContact,
   ...handlers
 }: Props) {
   const { profiles } = useCrm();
   const [showNotes, setShowNotes] = useState(false);
+  const [orderOpen, setOrderOpen] = useState(false);
   const composerRef = useRef<ComposerHandle>(null);
   // Contador de dragenter/dragleave: los hijos disparan eventos propios.
   const dragDepth = useRef(0);
   const [dragging, setDragging] = useState(false);
   const contact = conversation.contact;
-  const title = contact?.name || (contact ? formatPhone(contact.wa_id) : "Contacto");
+  const title = contact?.name || (contact ? formatPhone(contact.wa_id ?? contact.phone) : "Contacto");
   const windowOpen = now === null ? null : isWindowOpen(conversation.last_inbound_at, now);
   const remaining = now === null ? 0 : windowRemainingMs(conversation.last_inbound_at, now);
   const tags = contact?.tags ?? [];
   const canDrop = windowOpen === true;
+  const lastInboundId = messages.findLast((m) => m.direction === "inbound")?.id ?? null;
 
   function hasFiles(event: DragEvent) {
     return Array.from(event.dataTransfer.types).includes("Files");
@@ -118,7 +125,7 @@ export function ChatView({
                 {tags.length > 3 && <span className="text-xs text-texto-suave">+{tags.length - 3}</span>}
               </div>
             ) : (
-              contact && <p className="truncate text-xs text-texto-suave">{formatPhone(contact.wa_id)}</p>
+              contact && <p className="truncate text-xs text-texto-suave">{formatPhone(contact.wa_id ?? contact.phone)}</p>
             )}
           </div>
         </button>
@@ -168,7 +175,12 @@ export function ChatView({
             <Icon name="notas" className="size-5" />
           </IconButton>
 
-          <ConversationActionsMenu conversation={conversation} {...handlers} triggerClassName="text-texto-suave" />
+          <ConversationActionsMenu
+            conversation={conversation}
+            {...handlers}
+            triggerClassName="text-texto-suave"
+            onNewOrder={contact ? () => setOrderOpen(true) : undefined}
+          />
 
           <IconButton
             label={detailsOpen ? "Cerrar ficha del contacto" : "Abrir ficha del contacto"}
@@ -184,6 +196,15 @@ export function ChatView({
           </IconButton>
         </div>
       </header>
+
+      {contact && (
+        <SuggestionBanner
+          contactId={contact.id}
+          classification={contact.classification}
+          refreshKey={lastInboundId}
+          onResolved={onReloadContact}
+        />
+      )}
 
       {/* Se mantienen montados ambos para conservar el borrador y el scroll */}
       <div
@@ -214,6 +235,15 @@ export function ChatView({
       <div className={cn("min-h-0 flex-1 flex-col", showNotes ? "flex" : "hidden")}>
         <NotesPanel conversationId={conversation.id} />
       </div>
+
+      {contact && (
+        <OrderDialog
+          open={orderOpen}
+          onOpenChange={setOrderOpen}
+          source={{ kind: "contact", contactId: contact.id, contactName: title, conversationId: conversation.id }}
+          onCreated={onReloadContact}
+        />
+      )}
     </div>
   );
 }

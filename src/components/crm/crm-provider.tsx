@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import type { ContactRole } from "@/lib/crm/companies";
 import type { Profile, Tag } from "@/lib/crm/types";
 import { createClient } from "@/lib/supabase/client";
 
@@ -14,8 +15,11 @@ type CrmContextValue = {
   /** Todos los usuarios (para asignar conversaciones). */
   profiles: Profile[];
   tags: Tag[];
+  /** Catálogo de funciones (Compras, Pagos…) para los vínculos persona–empresa. */
+  roles: ContactRole[];
   reloadProfiles: () => Promise<void>;
   reloadTags: () => Promise<void>;
+  reloadRoles: () => Promise<void>;
 };
 
 const CrmContext = createContext<CrmContextValue | null>(null);
@@ -30,6 +34,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [roles, setRoles] = useState<ContactRole[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reloadProfiles = useCallback(async () => {
@@ -44,13 +49,19 @@ export function CrmProvider({ children }: { children: ReactNode }) {
     else setTags(data);
   }, [supabase]);
 
+  const reloadRoles = useCallback(async () => {
+    const { data, error } = await supabase.from("contact_roles").select("*").order("sort_order").order("name");
+    if (error) toast.error("No se pudieron cargar las funciones");
+    else setRoles(data);
+  }, [supabase]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const { data } = await supabase.auth.getUser();
       if (cancelled) return;
       setUserId(data.user?.id ?? null);
-      await Promise.all([reloadProfiles(), reloadTags()]);
+      await Promise.all([reloadProfiles(), reloadTags(), reloadRoles()]);
       if (!cancelled) setLoading(false);
     })();
 
@@ -65,7 +76,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, [supabase, router, reloadProfiles, reloadTags]);
+  }, [supabase, router, reloadProfiles, reloadTags, reloadRoles]);
 
   const value = useMemo<CrmContextValue>(() => {
     const me = profiles.find((p) => p.id === userId) ?? null;
@@ -75,10 +86,12 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       loading,
       profiles,
       tags,
+      roles,
       reloadProfiles,
       reloadTags,
+      reloadRoles,
     };
-  }, [profiles, userId, loading, tags, reloadProfiles, reloadTags]);
+  }, [profiles, userId, loading, tags, roles, reloadProfiles, reloadTags, reloadRoles]);
 
   return <CrmContext value={value}>{children}</CrmContext>;
 }

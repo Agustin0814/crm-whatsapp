@@ -64,10 +64,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 5. Enviar con la Cloud API.
+  // 5. Enviar con la Cloud API (un contacto creado a mano puede no tener WhatsApp).
+  const waId = conversation.contacts.wa_id;
+  if (!waId) {
+    return NextResponse.json(
+      { error: "Este contacto no tiene un número de WhatsApp vinculado" },
+      { status: 422 },
+    );
+  }
   let waMessageId: string;
   try {
-    waMessageId = await sendTextMessage(conversation.contacts.wa_id, text);
+    waMessageId = await sendTextMessage(waId, text);
   } catch (error) {
     if (error instanceof WhatsAppApiError) {
       console.error(`[whatsapp-send] Meta rechazó el envío (código ${error.code ?? "?"})`);

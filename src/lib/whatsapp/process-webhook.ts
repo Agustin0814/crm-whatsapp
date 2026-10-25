@@ -107,37 +107,23 @@ async function handleInboundMessage(
   if (created && media) await storeInboundMedia(supabase, created);
 }
 
-/** Crea el contacto si no existe y devuelve su id. No pisa un nombre editado en el CRM. */
+/**
+ * Devuelve el id del contacto de este wa_id. La función de la base
+ * (upsert_whatsapp_contact) busca por wa_id; si no existe, vincula un contacto
+ * creado a mano con el mismo teléfono normalizado, y si tampoco, lo crea.
+ * Solo completa el nombre si estaba vacío (no pisa uno editado en el CRM).
+ */
 async function upsertContact(
   supabase: AdminClient,
   waId: string,
   profileName: string | null,
 ): Promise<string> {
-  const { error: upsertError } = await supabase
-    .from("contacts")
-    .upsert(
-      { wa_id: waId, phone: waId, name: profileName },
-      { onConflict: "wa_id", ignoreDuplicates: true },
-    );
-  if (upsertError) throw upsertError;
-
-  const { data: contact, error } = await supabase
-    .from("contacts")
-    .select("id, name")
-    .eq("wa_id", waId)
-    .single();
+  const { data, error } = await supabase.rpc("upsert_whatsapp_contact", {
+    p_wa_id: waId,
+    p_name: profileName ?? "",
+  });
   if (error) throw error;
-
-  // Si el contacto ya existía sin nombre, completarlo con el del perfil.
-  if (!contact.name && profileName) {
-    const { error: updateError } = await supabase
-      .from("contacts")
-      .update({ name: profileName })
-      .eq("id", contact.id);
-    if (updateError) throw updateError;
-  }
-
-  return contact.id;
+  return data;
 }
 
 /** Devuelve la conversación del contacto (hay una por contacto) o la crea. */

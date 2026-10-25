@@ -1,17 +1,22 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { TagChip } from "@/components/crm/tag-chip";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { errorMessage, setContactTag, updateContact } from "@/lib/crm/contacts";
+import { errorMessage, fetchContact, isUniqueViolation, setContactTag, updateContact } from "@/lib/crm/contacts";
 import { parseCustomFields, type ContactWithTags, type CustomFields } from "@/lib/crm/types";
 import { formatDate, formatPhone } from "@/lib/format";
 import type { TablesUpdate } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/client";
+import { ClassificationControl } from "./classification-control";
+import { CompanyLinks } from "./company-links";
 import { CustomFieldsEditor } from "./custom-fields-editor";
+import { notifyDuplicatePhone } from "./duplicate-phone";
 import { EditableField } from "./editable-field";
 import { TagPicker } from "./tag-picker";
 
@@ -20,6 +25,8 @@ type Props = {
   onContactChange: (contact: ContactWithTags) => void;
   /** Acciones extra bajo el encabezado (p. ej. «Abrir conversación»). */
   actions?: ReactNode;
+  /** Enlace a la ficha completa (pedidos, pagos…). Se oculta dentro de ella. */
+  showFullLink?: boolean;
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -37,16 +44,29 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  * Ficha del contacto con edición en línea y guardado automático.
  * El nombre editado aquí no lo pisa el webhook (solo completa nombres vacíos).
  */
-export function ContactDetails({ contact, onContactChange, actions }: Props) {
+export function ContactDetails({ contact, onContactChange, actions, showFullLink = true }: Props) {
   const supabase = createClient();
+  const router = useRouter();
 
   async function save(patch: TablesUpdate<"contacts">) {
     try {
       const updated = await updateContact(supabase, contact.id, patch);
       onContactChange(updated);
     } catch (error) {
-      toast.error(errorMessage(error, "No se pudo guardar el contacto"));
+      if (patch.phone && isUniqueViolation(error)) {
+        void notifyDuplicatePhone(supabase, patch.phone, (href) => router.push(href), contact.id);
+      } else {
+        toast.error(errorMessage(error, "No se pudo guardar el contacto"));
+      }
       throw error;
+    }
+  }
+
+  async function reload() {
+    try {
+      onContactChange(await fetchContact(supabase, contact.id));
+    } catch (error) {
+      toast.error(errorMessage(error, "No se pudo recargar el contacto"));
     }
   }
 
@@ -65,20 +85,42 @@ export function ContactDetails({ contact, onContactChange, actions }: Props) {
     }
   }
 
-  const displayName = contact.name || formatPhone(contact.wa_id);
+  // Un contacto creado a mano puede no tener WhatsApp: se usa su teléfono.
+  const phone = contact.wa_id ?? contact.phone;
+  const displayName = contact.name || formatPhone(phone);
 
   return (
     <div className="space-y-5">
       {/* Encabezado: avatar grande, nombre y teléfono legible */}
       <div className="flex items-center gap-4">
-        <ContactAvatar seed={contact.wa_id} name={contact.name} company={contact.company} size="xl" />
+        <ContactAvatar seed={contact.wa_id ?? contact.id} name={contact.name} company={contact.company} size="xl" />
         <div className="min-w-0">
           <p className="truncate text-lg font-semibold">{displayName}</p>
-          <p className="text-[0.9375rem] tabular-nums">{formatPhone(contact.wa_id)}</p>
+          <p className="text-[0.9375rem] tabular-nums">{formatPhone(phone)}</p>
           {contact.company && <p className="truncate text-sm text-texto-suave">{contact.company}</p>}
         </div>
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {(actions || showFullLink) && (
+        <div className="flex flex-wrap gap-2">
+          {actions}
+          {showFullLink && (
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/contactos/persona/${contact.id}`}>Ficha completa y pedidos</Link>
+            </Button>
+          )}
+        </div>
+      )}
+
+      <Section title="Clasificación">
+        <ClassificationControl
+          entity="contact"
+          id={contact.id}
+          classification={contact.classification}
+          source={contact.classification_source}
+          classifiedAt={contact.classified_at}
+          onChanged={reload}
+        />
+      </Section>
 
       <Section title="Etiquetas">
         <div className="flex flex-wrap items-center gap-2">
@@ -86,7 +128,7 @@ export function ContactDetails({ contact, onContactChange, actions }: Props) {
             <TagChip key={tag.id} tag={tag} dot onRemove={() => void removeTag(tag.id)} />
           ))}
           <TagPicker
-            contactId={contact.id}
+            target={{ kind: "contact", id: contact.id }}
             value={contact.tags}
             onChange={(tags) => onContactChange({ ...contact, tags })}
             trigger={
@@ -117,8 +159,15 @@ export function ContactDetails({ contact, onContactChange, actions }: Props) {
             onSave={(email) => save({ email })}
             validate={(v) => (EMAIL_RE.test(v) ? null : "Correo no válido")}
           />
-          <EditableField icon="empresa" label="Empresa" value={contact.company} onSave={(company) => save({ company })} />
         </div>
+      </Section>
+
+      <Section title="Empresas y funciones">
+        {/* contacts.company es texto heredado: se muestra, pero la relación real son los vínculos */}
+        {contact.company && (
+          <p className="text-xs text-texto-suave">Empresa anotada antes: {contact.company}</p>
+        )}
+        <CompanyLinks mode="contact" contactId={contact.id} />
       </Section>
 
       <Section title="Notas generales">

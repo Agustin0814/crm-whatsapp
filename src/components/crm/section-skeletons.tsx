@@ -144,20 +144,32 @@ export function InboxSkeleton() {
 export function ContactsSkeleton() {
   return (
     <SkeletonScreen>
-      <PageHeader title="Contactos" description="Personas que han escrito a tu número de WhatsApp." />
-      {/* Barra de herramientas (mismas clases que ContactsView) */}
+      <PageHeader
+        title="Contactos"
+        description="Personas y empresas: prospectos, clientes y proveedores."
+        actions={<Skeleton className="h-9 w-24 rounded-lg" />}
+      />
+      {/* Pestañas (Todos, Sin clasificar, Prospectos…) */}
+      <div className="border-b px-4 md:px-6">
+        <div className="flex h-11 items-center gap-6 overflow-hidden">
+          {["w-12", "w-24", "w-20", "w-16", "w-20", "w-16"].map((w, i) => (
+            <Skeleton key={i} className={cn("h-3.5 shrink-0", w)} />
+          ))}
+        </div>
+      </div>
+      {/* Barra de búsqueda y filtros (mismas clases que ContactsView) */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 md:px-6">
         <Skeleton className="h-8 w-full rounded-lg sm:max-w-xs" />
-        <Skeleton className="h-8 w-48 rounded-lg" />
-        <Skeleton className="ml-auto h-4 w-24" />
+        <Skeleton className="h-8 w-28 rounded-lg" />
+        <Skeleton className="h-8 w-28 rounded-lg" />
       </div>
-      {/* Tabla: encabezado de 40 px y filas de 53 px */}
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className="flex h-10 items-center gap-6 border-b px-2">
           <Skeleton className="h-3 w-20" />
-          <Skeleton className="hidden h-3 w-16 lg:block" />
-          <Skeleton className="hidden h-3 w-16 md:block" />
+          <Skeleton className="hidden h-3 w-24 lg:block" />
           <Skeleton className="h-3 w-20" />
+          <Skeleton className="hidden h-3 w-16 md:block" />
+          <Skeleton className="hidden h-3 w-24 sm:block" />
         </div>
         {Array.from({ length: 10 }, (_, i) => (
           <div key={i} className="flex h-[53px] items-center gap-6 border-b px-2">
@@ -168,11 +180,44 @@ export function ContactsSkeleton() {
                 <Skeleton className="h-3 w-24" />
               </div>
             </div>
-            <Skeleton className="hidden h-4 w-24 lg:block" />
-            <Skeleton className="hidden h-4 w-36 md:block" />
-            <Skeleton className="h-5 w-16 rounded-full" />
+            <Skeleton className="hidden h-4 w-28 lg:block" />
+            <Skeleton className="h-5 w-20 rounded-full" />
+            <Skeleton className="hidden h-5 w-16 rounded-full md:block" />
+            <Skeleton className="hidden h-4 w-20 sm:block" />
           </div>
         ))}
+      </div>
+    </SkeletonScreen>
+  );
+}
+
+/** Ficha completa (persona o empresa): encabezado, tarjetas de resumen y pestañas. */
+export function ProfileSkeleton() {
+  return (
+    <SkeletonScreen>
+      <div className="flex items-center gap-3 border-b px-4 py-4 md:px-6">
+        <Skeleton className="size-9 rounded-md" />
+        <Skeleton className="size-11 rounded-full" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+        <Skeleton className="h-9 w-32 rounded-lg" />
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-24 rounded-xl" />
+            ))}
+          </div>
+          <div className="flex h-11 items-center gap-6 border-b">
+            {["w-16", "w-28", "w-32", "w-12"].map((w, i) => (
+              <Skeleton key={i} className={cn("h-3.5", w)} />
+            ))}
+          </div>
+          <Skeleton className="h-64 rounded-xl" />
+        </div>
       </div>
     </SkeletonScreen>
   );
@@ -186,9 +231,9 @@ export function SettingsSkeleton() {
       <PageHeader title="Configuración" description="Tu perfil, el equipo, las notificaciones y los catálogos del CRM." />
       {/* Pestañas (33 px con el borde) */}
       <div className="border-b px-4 md:px-6">
-        <div className="flex h-8 items-center gap-6">
-          {["w-12", "w-16", "w-24", "w-20", "w-16", "w-32"].map((w, i) => (
-            <Skeleton key={i} className={cn("h-3.5", w)} />
+        <div className="flex h-8 items-center gap-6 overflow-hidden">
+          {["w-12", "w-16", "w-24", "w-20", "w-16", "w-32", "w-16", "w-32"].map((w, i) => (
+            <Skeleton key={i} className={cn("h-3.5 shrink-0", w)} />
           ))}
         </div>
       </div>

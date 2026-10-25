@@ -16,7 +16,7 @@ export function applyTemplate(
   body: string,
   contact: Pick<Contact, "name" | "wa_id" | "phone" | "company"> | null,
 ): string {
-  const name = contact?.name?.trim() || (contact ? `+${contact.wa_id}` : "");
+  const name = contact?.name?.trim() || (contact?.wa_id ? `+${contact.wa_id}` : "");
   const values: Record<string, string> = {
     nombre: name,
     primer_nombre: contact?.name?.trim().split(/\s+/)[0] ?? "",

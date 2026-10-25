@@ -16,20 +16,22 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { setCompanyTag } from "@/lib/crm/companies";
 import { errorMessage, setContactTag } from "@/lib/crm/contacts";
 import { TAG_COLORS, type Tag } from "@/lib/crm/types";
 import { createClient } from "@/lib/supabase/client";
 
 type Props = {
-  contactId: string;
+  /** De quién son las etiquetas: un contacto o una empresa (mismo catálogo). */
+  target: { kind: "contact" | "company"; id: string };
   value: Tag[];
   onChange: (tags: Tag[]) => void;
   trigger?: ReactNode;
   align?: "start" | "end";
 };
 
-/** Selector de etiquetas de un contacto: marca/desmarca y permite crear nuevas. */
-export function TagPicker({ contactId, value, onChange, trigger, align = "start" }: Props) {
+/** Selector de etiquetas de un contacto o empresa: marca/desmarca y permite crear nuevas. */
+export function TagPicker({ target, value, onChange, trigger, align = "start" }: Props) {
   const supabase = createClient();
   const { tags, reloadTags } = useCrm();
   const [open, setOpen] = useState(false);
@@ -44,7 +46,8 @@ export function TagPicker({ contactId, value, onChange, trigger, align = "start"
     const next = on ? [...value, tag] : value.filter((t) => t.id !== tag.id);
     onChange(next.sort((a, b) => a.name.localeCompare(b.name, "es")));
     try {
-      await setContactTag(supabase, contactId, tag.id, on);
+      if (target.kind === "contact") await setContactTag(supabase, target.id, tag.id, on);
+      else await setCompanyTag(supabase, target.id, tag.id, on);
     } catch (error) {
       onChange(value); // revertir
       toast.error(errorMessage(error, "No se pudo actualizar la etiqueta"));

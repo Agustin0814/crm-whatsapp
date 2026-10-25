@@ -1,134 +1,196 @@
 "use client";
 
-import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  SearchXIcon,
-} from "lucide-react";
-import { Icon } from "@/components/ui/icon";
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, SearchXIcon } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
+import { ClassificationBadge } from "@/components/crm/classification-badge";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { useCrm } from "@/components/crm/crm-provider";
 import { EmptyState } from "@/components/crm/empty-state";
 import { PageHeader } from "@/components/crm/page-header";
 import { TagChip } from "@/components/crm/tag-chip";
 import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { errorMessage } from "@/lib/crm/contacts";
-import { normalizeContact } from "@/lib/crm/conversations";
-import type { Contact, ContactWithTags, Tag } from "@/lib/crm/types";
-import { formatDate, formatPhone } from "@/lib/format";
+import type { Tables } from "@/lib/supabase/database.types";
+import { formatPhone, formatRelative } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { ContactDetails } from "./contact-details";
-import { TagPicker } from "./tag-picker";
+import { NewEntryDialog, type NewEntryPreset } from "./new-entry-dialog";
 
 const PAGE_SIZE = 25;
 /** Filas que entran escalonadas (30 ms entre una y otra) en la primera carga. */
 const STAGGER_ROWS = 8;
-const ALL_TAGS = "__todas__";
+const SEARCH_DEBOUNCE_MS = 300;
 
-type SortColumn = "name" | "company" | "updated_at" | "created_at";
-type Row = ContactWithTags & { conversationId: string | null };
-type RawRow = Contact & {
-  contact_tags: { tags: Tag | null }[];
-  conversations: { id: string } | null;
-};
+type DirectoryRow = Tables<"contact_directory">;
 
-/** Quita caracteres con significado especial en los filtros de PostgREST. */
-function sanitizeSearch(value: string): string {
-  return value.replace(/[%,()*\\:"]/g, " ").trim();
+/** Pestañas del directorio: qué tipo y qué clasificación muestra cada una. */
+const TABS = [
+  { value: "todos", label: "Todos", kind: "all", classification: null },
+  { value: "sin-clasificar", label: "Sin clasificar", kind: "all", classification: "unclassified" },
+  { value: "prospectos", label: "Prospectos", kind: "all", classification: "prospect" },
+  { value: "clientes", label: "Clientes", kind: "all", classification: "customer" },
+  { value: "proveedores", label: "Proveedores", kind: "all", classification: "supplier" },
+  { value: "empresas", label: "Empresas", kind: "company", classification: null },
+] as const;
+type Activity = "all" | "active" | "inactive";
+
+function hrefFor(row: DirectoryRow): string {
+  return row.kind === "company" ? `/contactos/empresa/${row.id}` : `/contactos/persona/${row.id}`;
 }
 
+/**
+ * Directorio de personas y empresas. Busca por nombre, teléfono (con o sin
+ * formato), correo, razón social o RFC; filtra por clasificación, actividad,
+ * etiquetas y funciones. El orden es por última interacción.
+ */
 export function ContactsView() {
   const supabase = createClient();
-  const { tags } = useCrm();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { tags, roles } = useCrm();
+
+  const requestedTab = searchParams.get("tab");
+  const tab = TABS.find((t) => t.value === requestedTab) ?? TABS[0];
+  const [activity, setActivity] = useState<Activity>("all");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [tagId, setTagId] = useState<string | null>(null);
-  const [sort, setSort] = useState<{ column: SortColumn; ascending: boolean }>({ column: "updated_at", ascending: false });
+  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [roleIds, setRoleIds] = useState<string[]>([]);
   const [page, setPage] = useState(0);
-  const [rows, setRows] = useState<Row[]>([]);
-  const [total, setTotal] = useState(0);
+  const [rows, setRows] = useState<DirectoryRow[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
-  /** Cargas completadas: la entrada escalonada solo se aplica en la primera. */
   const [loadCount, setLoadCount] = useState(0);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [preset, setPreset] = useState<NewEntryPreset | null>(null);
+  const [now, setNow] = useState<number | null>(null);
   const requestRef = useRef(0);
+
+  // Reloj para «hace 3 días» (se actualiza cada minuto).
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 60_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, []);
 
   // Búsqueda con retardo.
   useEffect(() => {
-    const next = sanitizeSearch(searchInput);
+    const next = searchInput.trim();
     if (next === search) return;
     const t = setTimeout(() => {
       setPage(0);
       setLoading(true);
       setSearch(next);
-    }, 300);
+    }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [searchInput, search]);
 
+  const effectiveActivity: Activity = tab.value === "clientes" ? activity : "all";
+
   useEffect(() => {
     const request = ++requestRef.current;
-    // El filtro por etiqueta usa un segundo embedding con !inner.
-    const select = tagId
-      ? "*, contact_tags(tags(*)), conversations(id), filtro:contact_tags!inner(tag_id)"
-      : "*, contact_tags(tags(*)), conversations(id)";
-    let query = supabase.from("contacts").select(select, { count: "exact" });
-    if (tagId) query = query.eq("filtro.tag_id", tagId);
-    if (search) {
-      const p = `%${search}%`;
-      query = query.or(`name.ilike.${p},wa_id.ilike.${p},phone.ilike.${p},email.ilike.${p},company.ilike.${p}`);
-    }
-    query
-      .order(sort.column, { ascending: sort.ascending, nullsFirst: false })
-      .order("id")
-      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
-      .then(({ data, error, count }) => {
+    supabase
+      .rpc("search_directory", {
+        p_search: search || undefined,
+        p_kind: tab.kind,
+        p_classification: tab.classification ?? undefined,
+        p_activity: effectiveActivity,
+        p_tag_ids: tagIds.length ? tagIds : undefined,
+        p_role_ids: roleIds.length ? roleIds : undefined,
+        // Se pide una fila extra para saber si hay página siguiente.
+        p_limit: PAGE_SIZE + 1,
+        p_offset: page * PAGE_SIZE,
+      })
+      .then(({ data, error }) => {
         if (request !== requestRef.current) return;
         if (error) {
-          toast.error(errorMessage(error, "No se pudieron cargar los contactos"));
+          toast.error(errorMessage(error, "No se pudo cargar el directorio"));
+          setRows([]);
+          setHasMore(false);
         } else {
-          const raw = data as unknown as RawRow[];
-          setRows(
-            raw.map(({ conversations, ...contact }) => ({
-              ...normalizeContact({ ...contact, contact_tags: contact.contact_tags }),
-              conversationId: conversations?.id ?? null,
-            })),
-          );
-          setTotal(count ?? 0);
+          setRows(data.slice(0, PAGE_SIZE));
+          setHasMore(data.length > PAGE_SIZE);
         }
         setLoading(false);
         setLoadCount((n) => n + 1);
       });
-  }, [supabase, search, tagId, sort, page]);
+  }, [supabase, search, tab.kind, tab.classification, effectiveActivity, tagIds, roleIds, page]);
 
-  function changeSort(column: SortColumn) {
+  function changeTab(value: string) {
     setLoading(true);
     setPage(0);
-    setSort((s) => (s.column === column ? { column, ascending: !s.ascending } : { column, ascending: column === "name" || column === "company" }));
+    router.replace(value === "todos" ? pathname : `${pathname}?tab=${value}`, { scroll: false });
   }
 
-  function updateRow(contact: ContactWithTags) {
-    setRows((prev) => prev.map((r) => (r.id === contact.id ? { ...r, ...contact } : r)));
+  function changeFilter(apply: () => void) {
+    setLoading(true);
+    setPage(0);
+    apply();
   }
 
-  const open = rows.find((r) => r.id === openId) ?? null;
-  const from = total === 0 ? 0 : page * PAGE_SIZE + 1;
-  const to = Math.min(total, (page + 1) * PAGE_SIZE);
-  const filtered = search !== "" || tagId !== null;
+  const filtered = search !== "" || tagIds.length > 0 || roleIds.length > 0 || effectiveActivity !== "all";
+  const tagById = new Map(tags.map((t) => [t.id, t]));
+  const roleById = new Map(roles.map((r) => [r.id, r]));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title="Contactos" description="Personas que han escrito a tu número de WhatsApp." />
+      <PageHeader
+        title="Contactos"
+        description="Personas y empresas: prospectos, clientes y proveedores."
+        actions={
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button>
+                <Icon name="agregar" /> Nuevo
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onSelect={() => setPreset({ kind: "person", classification: "unclassified" })}>
+                <Icon name="persona" /> Persona
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setPreset({ kind: "company", classification: "unclassified" })}>
+                <Icon name="empresa" /> Empresa
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setPreset({ kind: "company", classification: "supplier" })}>
+                <Icon name="planta" /> Proveedor
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        }
+      />
+
+      <Tabs value={tab.value} onValueChange={changeTab} className="gap-0">
+        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b px-4 md:px-6">
+          <TabsList variant="line" className="h-11">
+            {TABS.map((t) => (
+              <TabsTrigger key={t.value} value={t.value} className="px-3">
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+      </Tabs>
 
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 md:px-6">
         <div className="relative w-full sm:max-w-xs">
@@ -136,34 +198,64 @@ export function ContactsView() {
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Buscar por nombre, teléfono, correo o empresa"
+            placeholder="Nombre, teléfono, correo, RFC…"
             className="pl-8"
-            aria-label="Buscar contactos"
+            aria-label="Buscar en el directorio"
           />
         </div>
-        <Select
-          value={tagId ?? ALL_TAGS}
-          onValueChange={(v) => {
-            setLoading(true);
-            setPage(0);
-            setTagId(v === ALL_TAGS ? null : v);
-          }}
-        >
-          <SelectTrigger className="w-48" aria-label="Filtrar por etiqueta">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent position="popper">
-            <SelectItem value={ALL_TAGS}>Todas las etiquetas</SelectItem>
-            {tags.map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                <TagChip tag={t} size="xs" />
-              </SelectItem>
+        {tab.value === "clientes" && (
+          <div className="flex rounded-lg border p-0.5" role="group" aria-label="Actividad">
+            {(
+              [
+                ["all", "Todos"],
+                ["active", "Activos"],
+                ["inactive", "Inactivos"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={activity === value}
+                onClick={() => changeFilter(() => setActivity(value))}
+                className={cn(
+                  "h-7 rounded-md px-2.5 text-sm",
+                  activity === value ? "bg-marca-suave font-medium text-marca-texto" : "text-texto-suave hover:bg-superficie-2",
+                )}
+              >
+                {label}
+              </button>
             ))}
-          </SelectContent>
-        </Select>
-        <p className="ml-auto text-sm text-muted-foreground">
-          {loading ? " " : `${total} contacto${total === 1 ? "" : "s"}`}
-        </p>
+          </div>
+        )}
+        <MultiFilter
+          label="Etiquetas"
+          options={tags.map((t) => ({ id: t.id, name: t.name, render: <TagChip tag={t} size="xs" /> }))}
+          value={tagIds}
+          onChange={(v) => changeFilter(() => setTagIds(v))}
+        />
+        <MultiFilter
+          label="Funciones"
+          options={roles.map((r) => ({ id: r.id, name: r.name }))}
+          value={roleIds}
+          onChange={(v) => changeFilter(() => setRoleIds(v))}
+        />
+        {filtered && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              changeFilter(() => {
+                setSearchInput("");
+                setSearch("");
+                setTagIds([]);
+                setRoleIds([]);
+                setActivity("all");
+              })
+            }
+          >
+            Limpiar
+          </Button>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -171,37 +263,31 @@ export function ContactsView() {
           filtered ? (
             <EmptyState
               icon={SearchXIcon}
-              title="Ningún contacto coincide"
-              description="Prueba con otra búsqueda o quita el filtro de etiqueta."
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearchInput("");
-                    setTagId(null);
-                  }}
-                >
-                  Limpiar filtros
-                </Button>
-              }
+              title="Nada coincide"
+              description="Prueba con otra búsqueda o quita algún filtro."
             />
           ) : (
             <EmptyState
-              icon="contactos"
-              title="Aún no hay contactos"
-              description="Los contactos se crean solos cuando alguien escribe a tu número de WhatsApp Business."
+              icon={tab.kind === "company" ? "empresa" : "contactos"}
+              title={tab.kind === "company" ? "Aún no hay empresas" : `Sin registros en «${tab.label}»`}
+              description={
+                tab.kind === "company"
+                  ? "Crea una empresa con «Nuevo» o vincúlala desde la ficha de una persona."
+                  : "Los contactos se crean solos cuando alguien escribe a tu WhatsApp, o con «Nuevo»."
+              }
             />
           )
         ) : (
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
-                <SortableHead label="Contacto" column="name" sort={sort} onSort={changeSort} />
-                <SortableHead label="Empresa" column="company" sort={sort} onSort={changeSort} className="hidden lg:table-cell" />
-                <TableHead className="hidden md:table-cell">Correo</TableHead>
-                <TableHead>Etiquetas</TableHead>
-                <SortableHead label="Actualizado" column="updated_at" sort={sort} onSort={changeSort} className="hidden sm:table-cell" />
+                <TableHead>Nombre</TableHead>
+                <TableHead className="hidden xl:table-cell">Tipo</TableHead>
+                <TableHead className="hidden lg:table-cell">Empresa / contactos</TableHead>
+                <TableHead>Clasificación</TableHead>
+                <TableHead className="hidden md:table-cell">Etiquetas</TableHead>
+                <TableHead className="hidden xl:table-cell">Funciones</TableHead>
+                <TableHead className="hidden sm:table-cell">Última interacción</TableHead>
                 <TableHead className="w-12">
                   <span className="sr-only">Acciones</span>
                 </TableHead>
@@ -210,146 +296,179 @@ export function ContactsView() {
             <TableBody>
               {loading
                 ? Array.from({ length: 8 }, (_, i) => <SkeletonRow key={i} />)
-                : rows.map((row, index) => (
-                    <TableRow
-                      key={row.id}
-                      // Solo la primera vez que se monta la pantalla y solo las 8 primeras filas.
-                      className={cn("cursor-pointer", loadCount === 1 && index < STAGGER_ROWS && "entrada-fila")}
-                      style={loadCount === 1 && index < STAGGER_ROWS ? ({ "--i": index } as CSSProperties) : undefined}
-                      onClick={() => setOpenId(row.id)}
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <ContactAvatar seed={row.wa_id} name={row.name} company={row.company} size="sm" />
-                          <div className="min-w-0">
-                            <p className="truncate font-medium">{row.name || "Sin nombre"}</p>
-                            <p className="text-xs text-muted-foreground">{formatPhone(row.wa_id)}</p>
+                : rows.map((row, index) => {
+                    const isCompany = row.kind === "company";
+                    const stagger = loadCount === 1 && index < STAGGER_ROWS;
+                    const rowTags = (row.tag_ids ?? []).map((id) => tagById.get(id)).filter((t) => t !== undefined);
+                    const rowRoles = (row.role_ids ?? []).map((id) => roleById.get(id)).filter((r) => r !== undefined);
+                    const related = row.related_names ?? [];
+                    return (
+                      <TableRow
+                        key={`${row.kind}-${row.id}`}
+                        className={cn("cursor-pointer", stagger && "entrada-fila")}
+                        style={stagger ? ({ "--i": index } as CSSProperties) : undefined}
+                        onClick={() => router.push(hrefFor(row))}
+                      >
+                        <TableCell>
+                          <Link
+                            href={hrefFor(row)}
+                            className="flex items-center gap-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ContactAvatar
+                              seed={row.wa_id ?? row.id ?? ""}
+                              name={row.name}
+                              company={isCompany ? row.name : null}
+                              size="sm"
+                            />
+                            <div className="min-w-0">
+                              <p className="max-w-56 truncate font-medium">{row.display_name}</p>
+                              <p className="text-xs text-muted-foreground tabular-nums">
+                                {isCompany
+                                  ? row.phone || row.email || "Empresa"
+                                  : formatPhone(row.wa_id ?? row.phone)}
+                              </p>
+                            </div>
+                          </Link>
+                        </TableCell>
+                        <TableCell className="hidden text-muted-foreground xl:table-cell">
+                          {isCompany ? "Empresa" : "Persona"}
+                        </TableCell>
+                        <TableCell className="hidden max-w-56 text-muted-foreground lg:table-cell">
+                          {isCompany ? (
+                            related.length === 0 ? (
+                              "Sin contactos"
+                            ) : (
+                              <span className="block truncate" title={related.join(", ")}>
+                                {related.length} {related.length === 1 ? "contacto" : "contactos"}: {related.join(", ")}
+                              </span>
+                            )
+                          ) : related.length === 0 ? (
+                            "—"
+                          ) : (
+                            <span className="block truncate" title={related.join(", ")}>
+                              {related.join(", ")}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <ClassificationBadge classification={row.classification} inactive={row.is_inactive === true} size="xs" />
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <div className="flex max-w-xs flex-wrap gap-1">
+                            {rowTags.slice(0, 3).map((t) => (
+                              <TagChip key={t.id} tag={t} size="xs" />
+                            ))}
+                            {rowTags.length > 3 && <span className="text-xs text-texto-suave">+{rowTags.length - 3}</span>}
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden text-muted-foreground lg:table-cell">{row.company || "—"}</TableCell>
-                      <TableCell className="hidden text-muted-foreground md:table-cell">{row.email || "—"}</TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <div className="flex max-w-xs flex-wrap items-center gap-1">
-                          {row.tags.map((t) => (
-                            <TagChip key={t.id} tag={t} size="xs" />
-                          ))}
-                          <TagPicker
-                            contactId={row.id}
-                            value={row.tags}
-                            onChange={(tags) => updateRow({ ...row, tags })}
-                            trigger={
-                              <Button variant="ghost" size="icon-xs" className="rounded-full" aria-label="Editar etiquetas">
-                                <Icon name="agregar" />
-                              </Button>
-                            }
-                          />
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden text-muted-foreground sm:table-cell">{formatDate(row.updated_at)}</TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        {row.conversationId && (
-                          <Button variant="ghost" size="icon-sm" asChild>
-                            <Link href={`/?c=${row.conversationId}`} aria-label="Abrir conversación">
-                              <Icon name="bandeja" />
-                            </Link>
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell className="hidden xl:table-cell">
+                          <div className="flex max-w-56 flex-wrap gap-1">
+                            {rowRoles.map((r) => (
+                              <span key={r.id} className="inline-flex h-5 items-center rounded-full bg-info/15 px-2 text-[0.6875rem] font-medium">
+                                {r.name}
+                              </span>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden text-muted-foreground sm:table-cell">
+                          {now === null ? " " : formatRelative(row.last_interaction, now)}
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          {row.conversation_id ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon-sm" asChild>
+                                  <Link href={`/?c=${row.conversation_id}`} aria-label="Abrir conversación">
+                                    <Icon name="bandeja" />
+                                  </Link>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Abrir conversación</TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            !isCompany && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex size-8 items-center justify-center text-texto-suave/50" tabIndex={0}>
+                                    <Icon name="bandeja" className="size-4" />
+                                    <span className="sr-only">Sin conversación de WhatsApp</span>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>Sin conversación de WhatsApp</TooltipContent>
+                              </Tooltip>
+                            )
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
             </TableBody>
           </Table>
         )}
       </div>
 
-      {total > PAGE_SIZE && (
+      {(page > 0 || hasMore) && (
         <footer className="flex items-center justify-between gap-2 border-t px-4 py-2 text-sm md:px-6">
-          <span className="text-muted-foreground">
-            {from}–{to} de {total}
-          </span>
+          <span className="text-muted-foreground">Página {page + 1}</span>
           <div className="flex gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page === 0 || loading}
-              onClick={() => {
-                setLoading(true);
-                setPage((p) => p - 1);
-              }}
-            >
+            <Button variant="outline" size="sm" disabled={page === 0 || loading} onClick={() => changeFilter(() => setPage((p) => p - 1))}>
               <ChevronLeftIcon /> Anterior
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={to >= total || loading}
-              onClick={() => {
-                setLoading(true);
-                setPage((p) => p + 1);
-              }}
-            >
+            <Button variant="outline" size="sm" disabled={!hasMore || loading} onClick={() => changeFilter(() => setPage((p) => p + 1))}>
               Siguiente <ChevronRightIcon />
             </Button>
           </div>
         </footer>
       )}
 
-      <Sheet open={open !== null} onOpenChange={(v) => !v && setOpenId(null)}>
-        <SheetContent side="right" className="w-full gap-0 sm:max-w-md">
-          <SheetHeader className="border-b">
-            <SheetTitle>Detalle del contacto</SheetTitle>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {open && (
-              <ContactDetails
-                key={open.id}
-                contact={open}
-                onContactChange={updateRow}
-                actions={
-                  open.conversationId ? (
-                    <Button size="sm" asChild>
-                      <Link href={`/?c=${open.conversationId}`}>
-                        <Icon name="bandeja" /> Abrir conversación
-                      </Link>
-                    </Button>
-                  ) : null
-                }
-              />
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
+      <NewEntryDialog preset={preset} onClose={() => setPreset(null)} />
     </div>
   );
 }
 
-function SortableHead({
+/** Filtro de selección múltiple (etiquetas o funciones) en un popover con búsqueda. */
+function MultiFilter({
   label,
-  column,
-  sort,
-  onSort,
-  className,
+  options,
+  value,
+  onChange,
 }: {
   label: string;
-  column: SortColumn;
-  sort: { column: SortColumn; ascending: boolean };
-  onSort: (column: SortColumn) => void;
-  className?: string;
+  options: { id: string; name: string; render?: ReactNode }[];
+  value: string[];
+  onChange: (value: string[]) => void;
 }) {
-  const active = sort.column === column;
-  const SortIcon = sort.ascending ? ArrowUpIcon : ArrowDownIcon;
+  const selected = new Set(value);
   return (
-    <TableHead className={className} aria-sort={active ? (sort.ascending ? "ascending" : "descending") : "none"}>
-      <button
-        type="button"
-        onClick={() => onSort(column)}
-        className={cn("inline-flex items-center gap-1 hover:text-foreground", active && "text-foreground")}
-      >
-        {label}
-        <SortIcon className={cn("size-3.5", !active && "opacity-0")} aria-hidden />
-      </button>
-    </TableHead>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className={cn(value.length > 0 && "border-marca text-marca-texto")}>
+          <Icon name="filtros" /> {label}
+          {value.length > 0 && ` (${value.length})`}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-60 p-0" align="start">
+        <Command>
+          <CommandInput placeholder={`Buscar ${label.toLowerCase()}…`} />
+          <CommandList>
+            <CommandEmpty className="py-3 text-center text-sm text-muted-foreground">Sin coincidencias</CommandEmpty>
+            <CommandGroup>
+              {options.map((o) => (
+                <CommandItem
+                  key={o.id}
+                  value={o.name}
+                  onSelect={() => onChange(selected.has(o.id) ? value.filter((v) => v !== o.id) : [...value, o.id])}
+                >
+                  {o.render ?? o.name}
+                  <CheckIcon className={selected.has(o.id) ? "ml-auto" : "invisible ml-auto"} />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -365,10 +484,12 @@ function SkeletonRow() {
           </div>
         </div>
       </TableCell>
-      <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
-      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-36" /></TableCell>
-      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-      <TableCell className="hidden sm:table-cell"><Skeleton className="h-4 w-16" /></TableCell>
+      <TableCell className="hidden xl:table-cell"><Skeleton className="h-4 w-14" /></TableCell>
+      <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
+      <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+      <TableCell className="hidden xl:table-cell"><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+      <TableCell className="hidden sm:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
       <TableCell />
     </TableRow>
   );
