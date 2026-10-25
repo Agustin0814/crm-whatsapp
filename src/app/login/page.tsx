@@ -1,10 +1,9 @@
 "use client";
 
 import { CircleAlertIcon, Loader2Icon } from "lucide-react";
-import { useTheme } from "next-themes";
 import { useRouter } from "next/navigation";
-import { useState, useSyncExternalStore, type FormEvent } from "react";
-import { BrandIcon, BrandWordmark } from "@/components/crm/brand-logo";
+import { useState, type FormEvent } from "react";
+import { BrandIcon, ThemedWordmark } from "@/components/crm/brand-logo";
 import { ThemeToggle } from "@/components/crm/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,12 +11,6 @@ import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 
 /** Mensaje claro según el error de Supabase Auth (sin detalles técnicos). */
-/** false en el servidor y durante la hidratación; true después (sin desajustes). */
-const subscribeNoop = () => () => {};
-function useHydrated(): boolean {
-  return useSyncExternalStore(subscribeNoop, () => true, () => false);
-}
-
 function loginErrorMessage(error: { status?: number; code?: string; message?: string }): string {
   if (error.code === "invalid_credentials" || error.status === 400) return "Correo o contraseña incorrectos.";
   if (error.code === "email_not_confirmed") return "Tu correo aún no está confirmado. Pide ayuda a un administrador.";
@@ -28,9 +21,6 @@ function loginErrorMessage(error: { status?: number; code?: string; message?: st
 
 export default function LoginPage() {
   const router = useRouter();
-  const { resolvedTheme } = useTheme();
-  // El tema solo se conoce en el navegador: el logo se pinta tras hidratar.
-  const hydrated = useHydrated();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -65,10 +55,8 @@ export default function LoginPage() {
         <ThemeToggle side="bottom" />
       </div>
 
-      {/* Logo completo según el tema: una sola imagen (se reserva el hueco hasta conocerlo) */}
-      <div className="flex h-14 items-center">
-        {hydrated && resolvedTheme && <BrandWordmark background={resolvedTheme === "dark" ? "oscuro" : "claro"} className="h-14" />}
-      </div>
+      {/* Logo completo según el tema: las dos versiones en el HTML y el CSS muestra una */}
+      <ThemedWordmark className="h-14" />
 
       <div className="w-full max-w-sm rounded-2xl border bg-background p-6 shadow-sm sm:p-8">
         <div className="mb-6 flex items-center gap-3">

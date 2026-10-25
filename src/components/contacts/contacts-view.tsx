@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { Icon } from "@/components/ui/icon";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { useCrm } from "@/components/crm/crm-provider";
@@ -32,6 +32,8 @@ import { ContactDetails } from "./contact-details";
 import { TagPicker } from "./tag-picker";
 
 const PAGE_SIZE = 25;
+/** Filas que entran escalonadas (30 ms entre una y otra) en la primera carga. */
+const STAGGER_ROWS = 8;
 const ALL_TAGS = "__todas__";
 
 type SortColumn = "name" | "company" | "updated_at" | "created_at";
@@ -57,6 +59,8 @@ export function ContactsView() {
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  /** Cargas completadas: la entrada escalonada solo se aplica en la primera. */
+  const [loadCount, setLoadCount] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
   const requestRef = useRef(0);
 
@@ -103,6 +107,7 @@ export function ContactsView() {
           setTotal(count ?? 0);
         }
         setLoading(false);
+        setLoadCount((n) => n + 1);
       });
   }, [supabase, search, tagId, sort, page]);
 
@@ -205,8 +210,14 @@ export function ContactsView() {
             <TableBody>
               {loading
                 ? Array.from({ length: 8 }, (_, i) => <SkeletonRow key={i} />)
-                : rows.map((row) => (
-                    <TableRow key={row.id} className="cursor-pointer" onClick={() => setOpenId(row.id)}>
+                : rows.map((row, index) => (
+                    <TableRow
+                      key={row.id}
+                      // Solo la primera vez que se monta la pantalla y solo las 8 primeras filas.
+                      className={cn("cursor-pointer", loadCount === 1 && index < STAGGER_ROWS && "entrada-fila")}
+                      style={loadCount === 1 && index < STAGGER_ROWS ? ({ "--i": index } as CSSProperties) : undefined}
+                      onClick={() => setOpenId(row.id)}
+                    >
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <ContactAvatar seed={row.wa_id} name={row.name} company={row.company} size="sm" />

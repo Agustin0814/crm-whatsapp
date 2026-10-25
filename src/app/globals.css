@@ -5,6 +5,38 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
+ * Estado de la barra lateral (los atributos están en el contenedor .sidebar-root
+ * y llegan ya desde el servidor, así que no hay parpadeo ni desajuste al hidratar):
+ *  - ≥ 1024 px manda la preferencia guardada: data-sidebar-collapsed="true|false";
+ *  - 768–1023 px empieza recogida y se abre superpuesta: data-sidebar-overlay="open|closed".
+ * Uso: sidebar-expanded:opacity-100, sidebar-collapsed:hidden, etc.
+ */
+@custom-variant sidebar-expanded {
+  @media (width >= 1024px) {
+    :where([data-sidebar-collapsed="false"]) & {
+      @slot;
+    }
+  }
+  @media (width >= 768px) and (width < 1024px) {
+    :where([data-sidebar-overlay="open"]) & {
+      @slot;
+    }
+  }
+}
+@custom-variant sidebar-collapsed {
+  @media (width >= 1024px) {
+    :where([data-sidebar-collapsed="true"]) & {
+      @slot;
+    }
+  }
+  @media (width >= 768px) and (width < 1024px) {
+    :where([data-sidebar-overlay="closed"]) & {
+      @slot;
+    }
+  }
+}
+
+/*
  * ===========================================================================
  * Tokens de diseño de LG Blocks CRM
  * ---------------------------------------------------------------------------
@@ -46,13 +78,24 @@
   --color-error-suave: var(--error-suave);
   --color-info: var(--info);
 
-  /* --- Barra lateral (siempre oscura) ------------------------------------ */
+  /* --- Barra lateral (sigue el tema) -------------------------------------- */
   --color-lateral: var(--lateral);
-  --color-lateral-2: var(--lateral-2);
-  --color-lateral-activo: var(--lateral-activo);
   --color-lateral-borde: var(--lateral-borde);
   --color-lateral-texto: var(--lateral-texto);
+  --color-lateral-texto-fuerte: var(--lateral-texto-fuerte);
   --color-lateral-texto-suave: var(--lateral-texto-suave);
+  --color-lateral-hover: var(--lateral-hover);
+  --color-lateral-activo: var(--lateral-activo);
+  --color-lateral-activo-texto: var(--lateral-activo-texto);
+  --color-lateral-activo-icono: var(--lateral-activo-icono);
+  --color-lateral-acento: var(--lateral-acento);
+  --color-lateral-tarjeta: var(--lateral-tarjeta);
+  --color-lateral-tarjeta-borde: var(--lateral-tarjeta-borde);
+  --color-lateral-pie: var(--lateral-pie);
+
+  /* --- Esqueletos de carga ------------------------------------------------ */
+  --color-esqueleto: var(--esqueleto);
+  --color-esqueleto-brillo: var(--esqueleto-brillo);
 
   /* --- Chat --------------------------------------------------------------- */
   --color-burbuja-entrante: var(--burbuja-entrante);
@@ -92,7 +135,7 @@
   --color-sidebar-primary: var(--marca);
   --color-sidebar-primary-foreground: var(--sobre-marca);
   --color-sidebar-accent: var(--lateral-activo);
-  --color-sidebar-accent-foreground: var(--sobre-marca);
+  --color-sidebar-accent-foreground: var(--lateral-activo-texto);
   --color-sidebar-border: var(--lateral-borde);
   --color-sidebar-ring: var(--marca);
 
@@ -113,8 +156,11 @@
   --radius: 0.625rem;
 
   /* Medidas del layout (se usan como w-(--lista-ancho), etc.) */
-  --lateral-ancho: 15rem; /* barra lateral expandida (≥ xl) */
-  --lateral-ancho-mini: 4.5rem; /* barra lateral contraída (lg) */
+  --lateral-ancho: 15rem; /* barra lateral abierta */
+  --lateral-ancho-mini: 4.5rem; /* barra lateral recogida (solo iconos, 72 px) */
+  --lateral-duracion: 225ms; /* animación de abrir/recoger */
+  --lateral-fila: 3rem; /* alto de cada opción del menú (48 px) */
+  --lateral-fila-paso: 3.25rem; /* alto + separación (52 px): paso de la píldora deslizante */
   --lista-ancho: 22rem; /* lista de conversaciones */
   --ficha-ancho: 21rem; /* ficha del contacto */
   --barra-inferior-alto: 4rem; /* navegación inferior en móvil/tablet */
@@ -147,13 +193,24 @@
   --error-suave: #fdecec;
   --info: #2563eb;
 
-  /* Barra lateral: igual en claro y oscuro */
-  --lateral: #151a23;
-  --lateral-2: #1c222d;
-  --lateral-activo: #232b38;
-  --lateral-borde: #2a3240;
-  --lateral-texto: #c9ced8; /* 11:1 */
-  --lateral-texto-suave: #8e96a6; /* 5.9:1 */
+  /* Barra lateral — tema claro (contrastes medidos con WCAG 2) */
+  --lateral: #f7f8fa;
+  --lateral-borde: #e6e8ec; /* borde derecho sutil */
+  --lateral-texto: #2a2f3a; /* 12.6:1 */
+  --lateral-texto-fuerte: #1a1d23;
+  --lateral-texto-suave: #5b6170; /* 5.8:1; iconos inactivos y botón de menú */
+  --lateral-hover: #eceef2; /* texto encima 11.5:1 */
+  --lateral-activo: #fef3ee; /* fondo suave de marca */
+  --lateral-activo-texto: #b84920; /* 4.8:1 */
+  --lateral-activo-icono: #c44e22; /* 4.3:1 */
+  --lateral-acento: #ec5e2a; /* barra del ítem activo: 3.1:1 (no textual ≥ 3) */
+  --lateral-tarjeta: #ffffff; /* tarjeta de sucursal; texto 13.4:1, suave 6.2:1 */
+  --lateral-tarjeta-borde: #e6e8ec;
+  --lateral-pie: #eceef2; /* hover del pie de usuario */
+
+  /* Esqueletos de carga (formas grises y brillo que las recorre) */
+  --esqueleto: #eceef2;
+  --esqueleto-brillo: #f8f9fb;
 
   /* Chat */
   --burbuja-entrante: #f1f2f5;
@@ -205,6 +262,24 @@
   --error-suave: #3a1717;
   --info: #60a5fa;
 
+  /* Barra lateral — tema oscuro (igual que antes) */
+  --lateral: #151a23;
+  --lateral-borde: #2a3240;
+  --lateral-texto: #c9ced8; /* 11:1 */
+  --lateral-texto-fuerte: #ffffff;
+  --lateral-texto-suave: #8e96a6; /* 5.9:1 */
+  --lateral-hover: #1c222d; /* texto encima 10.1:1 */
+  --lateral-activo: #232b38;
+  --lateral-activo-texto: #ffffff; /* 14.3:1 */
+  --lateral-activo-icono: #ec5e2a; /* 4.2:1 */
+  --lateral-acento: #ec5e2a; /* 5.2:1 */
+  --lateral-tarjeta: #1c222d; /* texto 10.1:1, suave 5.4:1 */
+  --lateral-tarjeta-borde: #2a3240;
+  --lateral-pie: #1c222d;
+
+  --esqueleto: #222833;
+  --esqueleto-brillo: #2d3442;
+
   --burbuja-entrante: #232833;
   --burbuja-entrante-texto: var(--texto); /* 12.3:1 */
   --nota: #2e2610;
@@ -241,5 +316,94 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ===========================================================================
+ * Movimiento (solo transform y opacity; con prefers-reduced-motion la regla
+ * global de arriba deja todo instantáneo)
+ * ======================================================================== */
+
+/* Esqueleto: forma gris redondeada con un brillo suave que la recorre. */
+@keyframes esqueleto-brillo {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+/* En @layer components para que las utilidades de Tailwind (bg-*, rounded-*) puedan sobrescribirlas. */
+@layer components {
+.esqueleto {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--esqueleto);
+}
+.esqueleto::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--esqueleto-brillo), transparent);
+  animation: esqueleto-brillo 1.4s ease-in-out infinite;
+}
+}
+
+/*
+ * Entrada diferida de una pantalla de carga, SIN JavaScript: empieza invisible
+ * y solo aparece si la carga dura más de 150 ms. Si los datos llegan antes, el
+ * esqueleto se reemplaza sin haberse visto nunca (sin destello).
+ */
+@keyframes aparecer {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@layer components {
+  .esqueleto-entrada {
+    opacity: 0;
+    animation: aparecer 180ms ease-out 150ms forwards;
+  }
+}
+
+/*
+ * Entrada de una sección nueva: fundido + 8 px hacia arriba en 200 ms.
+ * "backwards" aplica el primer fotograma solo mientras dura; al terminar no
+ * queda ningún transform (un transform residual rompería los position: fixed).
+ */
+@keyframes entrada-seccion {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@layer components {
+  .entrada-seccion {
+    animation: entrada-seccion 200ms ease-out backwards;
+  }
+
+  /* Filas que entran escalonadas (solo listas largas como Contactos): --i = índice. */
+  .entrada-fila {
+    animation: entrada-seccion 200ms ease-out backwards;
+    animation-delay: calc(var(--i, 0) * 30ms);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Sin brillo ni desplazamientos: el esqueleto queda gris y fijo. */
+  .esqueleto::after {
+    display: none;
+  }
+  .entrada-seccion,
+  .entrada-fila {
+    animation: none;
   }
 }

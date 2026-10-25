@@ -60,9 +60,9 @@ export function Inbox() {
   const searchParams = useSearchParams();
   const { me, profiles, tags, loading: crmLoading } = useCrm();
   const { setActiveConversationId } = useNotifications();
-  // ≥ 1024 px: lista y chat lado a lado. ≥ 1536 px: además la ficha como columna.
-  const isWide = useMediaQuery("(min-width: 1024px)");
+  // ≥ 1024 px: lista y chat lado a lado (lo resuelve el CSS). ≥ 1536 px: además la ficha como columna.
   const isXl = useMediaQuery("(min-width: 1536px)");
+  const hasSidebar = useMediaQuery("(min-width: 768px)"); // < 768 px se usa la barra inferior
   const { setHideBottomNav } = useShell();
   const myId = me?.id ?? null;
 
@@ -102,9 +102,9 @@ export function Inbox() {
 
   // En móvil y tablet, con un chat abierto se oculta la barra inferior (pantalla completa).
   useEffect(() => {
-    setHideBottomNav(selectedId !== null && !isWide);
+    setHideBottomNav(selectedId !== null && !hasSidebar);
     return () => setHideBottomNav(false);
-  }, [selectedId, isWide, setHideBottomNav]);
+  }, [selectedId, hasSidebar, setHideBottomNav]);
 
   // --- Reloj (ventana de 24 h y horas relativas) ------------------------------
   useEffect(() => {

@@ -21,6 +21,19 @@ export const BUSINESS_LABEL = process.env.NEXT_PUBLIC_BUSINESS_LABEL?.trim() || 
  *   logo-lg-blocks-claro.svg  → texto gris pizarra oscuro → para fondos claros.
  * Por eso aquí se nombran por el fondo en el que se usan.
  */
+/**
+ * Geometría medida de cada logo (fracciones del ancho/alto de la imagen),
+ * obtenida dibujando cada SVG en un canvas y buscando los píxeles opacos.
+ * Sirve para que, en la barra lateral, el cubo quede SIEMPRE fijo y al abrirla
+ * solo aparezca el texto del logo completo, alineado como en el original.
+ * Si se cambian los archivos de logo, hay que volver a medir.
+ */
+export const LOGO_GEOMETRY = {
+  icono: { cubeX0: 0.118, cubeX1: 0.885, cubeY0: 0.072, cubeY1: 0.945 },
+  fondoClaro: { ratio: 0.28, cubeX1: 0.2227, textX0: 0.2867, cubeY0: 0.1048, cubeY1: 0.9667 },
+  fondoOscuro: { ratio: 0.28, cubeX1: 0.2153, textX0: 0.2807, cubeY0: 0.1214, cubeY1: 0.9286 },
+} as const;
+
 export const BRAND_ASSETS = {
   logoFondoOscuro: "/brand/logo-lg-blocks-oscuro.svg",
   logoFondoClaro: "/brand/logo-lg-blocks-claro.svg",
