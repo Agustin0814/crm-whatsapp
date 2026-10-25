@@ -1,0 +1,245 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * ===========================================================================
+ * Tokens de diseño de LG Blocks CRM
+ * ---------------------------------------------------------------------------
+ * Todos los colores salen de aquí: claro en :root y oscuro en .dark.
+ * En los componentes se usan como clases de Tailwind (bg-marca, text-texto-suave,
+ * border-borde, bg-exito-suave…). Nada de colores sueltos en los componentes.
+ *
+ * Marca: #EC5E2A (medido en la maqueta). Contraste con blanco: 3.39:1, válido
+ * para iconos, barras y bordes (≥ 3:1) pero no para texto. Por eso:
+ *   --marca-fuerte  fondo naranja que lleva TEXTO blanco (≥ 4.5:1, AA)
+ *   --marca-texto   texto naranja sobre superficie y sobre --marca-suave (AA)
+ * Los pares están verificados con la fórmula de contraste WCAG 2.
+ * ===========================================================================
+ */
+@theme inline {
+  /* --- Marca ------------------------------------------------------------ */
+  --color-marca: var(--marca);
+  --color-marca-fuerte: var(--marca-fuerte);
+  --color-marca-suave: var(--marca-suave);
+  --color-marca-texto: var(--marca-texto);
+
+  /* --- Superficies, bordes y texto --------------------------------------- */
+  --color-superficie: var(--superficie);
+  --color-superficie-2: var(--superficie-2);
+  --color-superficie-3: var(--superficie-3);
+  --color-borde: var(--borde);
+  --color-texto: var(--texto);
+  --color-texto-suave: var(--texto-suave);
+
+  /* --- Estados ----------------------------------------------------------- */
+  --color-exito: var(--exito);
+  --color-exito-texto: var(--exito-texto);
+  --color-exito-suave: var(--exito-suave);
+  --color-advertencia: var(--advertencia);
+  --color-advertencia-texto: var(--advertencia-texto);
+  --color-advertencia-suave: var(--advertencia-suave);
+  --color-error: var(--error);
+  --color-error-texto: var(--error-texto);
+  --color-error-suave: var(--error-suave);
+  --color-info: var(--info);
+
+  /* --- Barra lateral (siempre oscura) ------------------------------------ */
+  --color-lateral: var(--lateral);
+  --color-lateral-2: var(--lateral-2);
+  --color-lateral-activo: var(--lateral-activo);
+  --color-lateral-borde: var(--lateral-borde);
+  --color-lateral-texto: var(--lateral-texto);
+  --color-lateral-texto-suave: var(--lateral-texto-suave);
+
+  /* --- Chat --------------------------------------------------------------- */
+  --color-burbuja-entrante: var(--burbuja-entrante);
+  --color-burbuja-entrante-texto: var(--burbuja-entrante-texto);
+  --color-burbuja-saliente: var(--burbuja-saliente);
+  --color-burbuja-saliente-texto: var(--burbuja-saliente-texto);
+  --color-nota: var(--nota);
+  --color-nota-texto: var(--nota-texto);
+  --color-nota-borde: var(--nota-borde);
+
+  /* --- Alias que usan los componentes de shadcn/ui ----------------------- */
+  --color-background: var(--superficie);
+  --color-foreground: var(--texto);
+  --color-card: var(--superficie);
+  --color-card-foreground: var(--texto);
+  --color-popover: var(--superficie);
+  --color-popover-foreground: var(--texto);
+  --color-primary: var(--marca-fuerte);
+  --color-primary-foreground: var(--sobre-marca);
+  --color-secondary: var(--superficie-2);
+  --color-secondary-foreground: var(--texto);
+  --color-muted: var(--superficie-2);
+  --color-muted-foreground: var(--texto-suave);
+  --color-accent: var(--superficie-2);
+  --color-accent-foreground: var(--texto);
+  --color-destructive: var(--error);
+  --color-border: var(--borde);
+  --color-input: var(--borde-control);
+  --color-ring: var(--marca);
+  --color-chart-1: var(--marca);
+  --color-chart-2: var(--info);
+  --color-chart-3: var(--exito);
+  --color-chart-4: var(--advertencia);
+  --color-chart-5: var(--texto-suave);
+  --color-sidebar: var(--lateral);
+  --color-sidebar-foreground: var(--lateral-texto);
+  --color-sidebar-primary: var(--marca);
+  --color-sidebar-primary-foreground: var(--sobre-marca);
+  --color-sidebar-accent: var(--lateral-activo);
+  --color-sidebar-accent-foreground: var(--sobre-marca);
+  --color-sidebar-border: var(--lateral-borde);
+  --color-sidebar-ring: var(--marca);
+
+  /* --- Tipografía y radios ------------------------------------------------- */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --radius: 0.625rem;
+
+  /* Medidas del layout (se usan como w-(--lista-ancho), etc.) */
+  --lateral-ancho: 15rem; /* barra lateral expandida (≥ xl) */
+  --lateral-ancho-mini: 4.5rem; /* barra lateral contraída (lg) */
+  --lista-ancho: 22rem; /* lista de conversaciones */
+  --ficha-ancho: 21rem; /* ficha del contacto */
+  --barra-inferior-alto: 4rem; /* navegación inferior en móvil/tablet */
+
+  /* Marca */
+  --marca: #ec5e2a;
+  --marca-fuerte: #c44e22; /* blanco encima: 4.7:1 */
+  --marca-suave: #fdeee7; /* fondo de selección */
+  --marca-texto: #b84920; /* 5.2:1 sobre blanco, 4.6:1 sobre --marca-suave */
+  --sobre-marca: #ffffff;
+
+  /* Superficies y texto */
+  --superficie: #ffffff;
+  --superficie-2: #f5f6f8; /* hover, campos, fondos secundarios */
+  --superficie-3: #eceef2; /* separadores de fecha, píldoras */
+  --borde: #e6e8ec;
+  --borde-control: #dcdfe5;
+  --texto: #1a1d23; /* 16.9:1 */
+  --texto-suave: #5b6170; /* 6.2:1 sobre blanco, 5.7:1 sobre --superficie-2 */
+
+  /* Estados */
+  --exito: #16a34a; /* punto «Abierta», icono de ventana */
+  --exito-texto: #15803d; /* 4.6:1 sobre --exito-suave */
+  --exito-suave: #eaf7ef;
+  --advertencia: #d97706;
+  --advertencia-texto: #8a3b05; /* 7.2:1 */
+  --advertencia-suave: #fef5e6;
+  --error: #dc2626;
+  --error-texto: #b91c1c; /* 6.5:1 */
+  --error-suave: #fdecec;
+  --info: #2563eb;
+
+  /* Barra lateral: igual en claro y oscuro */
+  --lateral: #151a23;
+  --lateral-2: #1c222d;
+  --lateral-activo: #232b38;
+  --lateral-borde: #2a3240;
+  --lateral-texto: #c9ced8; /* 11:1 */
+  --lateral-texto-suave: #8e96a6; /* 5.9:1 */
+
+  /* Chat */
+  --burbuja-entrante: #f1f2f5;
+  --burbuja-entrante-texto: var(--texto); /* 15:1 */
+  --burbuja-saliente: var(--marca-fuerte);
+  --burbuja-saliente-texto: #ffffff; /* 4.7:1 */
+  --nota: #fff8e1;
+  --nota-texto: #6b4a06;
+  --nota-borde: #f3dd9a;
+
+  /* Paleta de avatares: blanco encima ≥ 4.9:1 */
+  --avatar-1: #475569;
+  --avatar-2: #15803d;
+  --avatar-3: #0f766e;
+  --avatar-4: #1d4ed8;
+  --avatar-5: #c2410c;
+  --avatar-6: #7c3aed;
+  --avatar-7: #be185d;
+  --avatar-8: #a16207;
+
+  /* Chips de etiqueta: el texto se mezcla con este color para asegurar contraste */
+  --etiqueta-fondo-mezcla: 14%;
+  --etiqueta-texto-base: #111318;
+}
+
+.dark {
+  --marca: #ec5e2a;
+  --marca-fuerte: #c44e22;
+  --marca-suave: #3a2219;
+  --marca-texto: #f07040; /* 6.2:1 sobre superficie, 5:1 sobre --marca-suave */
+  --sobre-marca: #ffffff;
+
+  --superficie: #12151b;
+  --superficie-2: #1b2029;
+  --superficie-3: #252b36;
+  --borde: #2a303a;
+  --borde-control: #343b47;
+  --texto: #e8eaee; /* 15.2:1 */
+  --texto-suave: #9aa1ae; /* 7:1 */
+
+  --exito: #22c55e;
+  --exito-texto: #4ade80;
+  --exito-suave: #13291c;
+  --advertencia: #f59e0b;
+  --advertencia-texto: #fbbf24;
+  --advertencia-suave: #33260b;
+  --error: #ef4444;
+  --error-texto: #f87171;
+  --error-suave: #3a1717;
+  --info: #60a5fa;
+
+  --burbuja-entrante: #232833;
+  --burbuja-entrante-texto: var(--texto); /* 12.3:1 */
+  --nota: #2e2610;
+  --nota-texto: #f5d98a;
+  --nota-borde: #5a4a1c;
+
+  --etiqueta-fondo-mezcla: 22%;
+  --etiqueta-texto-base: #f4f5f7;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* Anillo de foco visible y consistente en todo lo interactivo */
+  :where(a, button, [role="button"], [role="tab"], input, textarea, select, summary):focus-visible {
+    outline: 2px solid var(--marca);
+    outline-offset: 2px;
+  }
+}
+
+/* Movimiento reducido: sin animaciones ni transiciones */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
