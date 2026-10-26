@@ -40,27 +40,91 @@ const NO_ASSIGNEE = "__nadie__";
  * identidad, reglas, información del negocio, escalamiento y traspaso,
  * modelo, techos, rango de espera, umbral de aviso y kill switch.
  */
-export function LockedConfigForm({ agentId, onSaved }: { agentId: string; onSaved: () => void }) {
+/** Nombres legibles para avisar qué campo no quedó guardado. */
+const FIELD_LABELS: Partial<Record<keyof Values, string>> = {
+  system_prompt: "identidad",
+  safety_rules: "reglas de seguridad",
+  business_info: "información del negocio",
+  escalation_topics: "temas de escalamiento",
+  handoff_message: "mensaje de traspaso",
+  handoff_assign_to: "asignar a",
+  model: "modelo",
+  temperature: "temperatura",
+  max_output_tokens: "máx. tokens de salida",
+  reasoning_effort: "esfuerzo de razonamiento",
+  allowed_tools: "herramientas",
+  max_consecutive_ceiling: "máx. respuestas seguidas",
+  daily_cap_ceiling: "tope diario máximo",
+  monthly_token_cap: "tope mensual de tokens",
+  input_price_per_mtok: "precio de entrada",
+  output_price_per_mtok: "precio de salida",
+  delay_seconds_min: "espera mínima",
+  delay_seconds_max: "espera máxima",
+  monthly_alert_threshold_pct: "aviso del mes",
+  kill_switch: "kill switch",
+};
+
+/** Compara un campo enviado con el guardado (los numeric pueden volver como texto). */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (typeof a === "number" || typeof b === "number") return a === null || b === null ? a === b : Number(a) === Number(b);
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function changedKeys(a: Values, b: Values): (keyof Values)[] {
+  return (Object.keys(a) as (keyof Values)[]).filter((k) => !sameValue(a[k], b[k]));
+}
+
+type Props = {
+  agentId: string;
+  onSaved: () => void;
+  /** Avisa al panel si hay cambios sin guardar (punto en la pestaña y aviso al cerrar). */
+  onDirtyChange?: (dirty: boolean) => void;
+};
+
+export function LockedConfigForm({ agentId, onSaved, onDirtyChange }: Props) {
   const supabase = createClient();
   const { profiles } = useCrm();
   const [values, setValues] = useState<Values | null>(null);
+  // Última versión guardada en la base: referencia para «cambios sin guardar».
+  const [savedValues, setSavedValues] = useState<Values | null>(null);
   const [topicsText, setTopicsText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const dirty = values !== null && savedValues !== null && changedKeys(values, savedValues).length > 0;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   useEffect(() => {
     let cancelled = false;
     fetchLockedConfig(supabase, agentId)
       .then((row) => {
-        if (cancelled || !row) return;
+        if (cancelled) return;
+        if (!row) {
+          setLoadError("No tienes acceso a esta configuración.");
+          return;
+        }
         setValues(toValues(row));
+        setSavedValues(toValues(row));
         setTopicsText(row.escalation_topics.join(", "));
       })
-      .catch(() => toast.error("No se pudo cargar la capa del proveedor"));
+      .catch((error) => {
+        if (!cancelled) setLoadError(errorMessage(error, "No se pudo cargar la capa del proveedor"));
+      });
     return () => {
       cancelled = true;
     };
   }, [supabase, agentId]);
 
+  if (loadError) {
+    return (
+      <p role="alert" className="m-5 rounded-lg bg-error-suave px-3 py-2 text-sm text-error-texto">
+        {loadError}
+      </p>
+    );
+  }
   if (!values) return <p className="px-5 py-4 text-sm text-texto-suave">Cargando…</p>;
 
   function set<K extends keyof Values>(key: K, value: Values[K]) {
@@ -75,18 +139,31 @@ export function LockedConfigForm({ agentId, onSaved }: { agentId: string; onSave
   async function save() {
     if (!values) return;
     if (values.delay_seconds_min > values.delay_seconds_max) {
-      toast.error("La espera mínima no puede ser mayor que la máxima");
+      setSaveError("La espera mínima no puede ser mayor que la máxima.");
       return;
     }
     setSaving(true);
+    setSaveError(null);
+    const sent = values;
     try {
-      const saved = await saveLockedConfig(supabase, agentId, values);
-      setValues(toValues(saved));
+      const saved = toValues(await saveLockedConfig(supabase, agentId, sent));
+      // Se comprueba campo por campo lo que REALMENTE quedó en la base.
+      const lost = changedKeys(sent, saved);
+      setValues(saved);
+      setSavedValues(saved);
       setTopicsText(saved.escalation_topics.join(", "));
       onSaved();
-      toast.success("Capa del proveedor guardada");
+      if (lost.length) {
+        const message = `No se guardó: ${lost.map((k) => FIELD_LABELS[k] ?? k).join(", ")}. Revisa el valor e inténtalo de nuevo.`;
+        setSaveError(message);
+        toast.error(message);
+      } else {
+        toast.success("Capa del proveedor guardada");
+      }
     } catch (error) {
-      toast.error(errorMessage(error, "No se pudo guardar la capa del proveedor"));
+      const message = errorMessage(error, "No se pudo guardar la capa del proveedor");
+      setSaveError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -262,10 +339,20 @@ export function LockedConfigForm({ agentId, onSaved }: { agentId: string; onSave
           </div>
         </ConfigSection>
       </fieldset>
-      <div className="flex justify-end border-t px-5 py-3">
-        <Button onClick={() => void save()} disabled={saving}>
-          {saving ? "Guardando…" : "Guardar capa del proveedor"}
-        </Button>
+      <div className="space-y-2 border-t px-5 py-3">
+        {saveError && (
+          <p role="alert" className="rounded-lg bg-error-suave px-3 py-2 text-sm text-error-texto">
+            {saveError}
+          </p>
+        )}
+        <div className="flex items-center justify-end gap-3">
+          <span className="text-xs text-texto-suave" aria-live="polite">
+            {dirty ? "Cambios sin guardar" : "Todo guardado"}
+          </span>
+          <Button onClick={() => void save()} disabled={saving || !dirty}>
+            {saving ? "Guardando…" : "Guardar capa del proveedor"}
+          </Button>
+        </div>
       </div>
     </div>
   );

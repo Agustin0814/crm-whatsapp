@@ -46,16 +46,41 @@ type Props = {
   limits: AgentLimits;
   canEdit: boolean;
   onSaved: (agent: Agent) => void;
+  /** Avisa al panel si hay cambios sin guardar (punto en la pestaña y aviso al cerrar). */
+  onDirtyChange?: (dirty: boolean) => void;
 };
+
+/** Diferencias entre lo enviado y lo que guardó la base (que recorta y filtra). */
+function describeAdjustments(sent: AgentConfig, saved: AgentConfig): string[] {
+  const notes: string[] = [];
+  if (sent.delay_seconds !== saved.delay_seconds) notes.push(`la espera quedó en ${formatDelay(saved.delay_seconds)}`);
+  if (sent.limits.max_consecutive !== saved.limits.max_consecutive)
+    notes.push(`las respuestas seguidas quedaron en ${saved.limits.max_consecutive}`);
+  if (sent.limits.daily_cap !== saved.limits.daily_cap) notes.push(`el máximo por día quedó en ${saved.limits.daily_cap}`);
+  if (sent.display_name !== saved.display_name) notes.push(`el nombre quedó como «${saved.display_name}»`);
+  return notes;
+}
+
+function sameIds(a: string[], b: string[]): boolean {
+  return a.length === b.length && [...a].sort().join() === [...b].sort().join();
+}
 
 /**
  * Panel del CLIENTE: solo opciones cerradas (nada de texto para el modelo,
  * modelos ni tokens). La base recorta y valida todo al guardar.
  */
-export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
+export function AgentConfigForm({ agent, limits, canEdit, onSaved, onDirtyChange }: Props) {
   const supabase = createClient();
   const { tags } = useCrm();
   const [config, setConfig] = useState<AgentConfig>(() => parseAgentConfig(agent.config, limits));
+  // Última versión guardada: con ella se calcula si hay cambios sin guardar.
+  const [savedConfig, setSavedConfig] = useState<AgentConfig>(() => parseAgentConfig(agent.config, limits));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const dirty = JSON.stringify(config) !== JSON.stringify(savedConfig);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
   const [customDelay, setCustomDelay] = useState(() => {
     const d = parseAgentConfig(agent.config, limits).delay_seconds;
     return !DELAY_PRESETS.some((p) => p.seconds === d);
@@ -103,20 +128,31 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
   async function save() {
     const problem = validate();
     if (problem) {
+      setSaveError(problem);
       toast.error(problem);
       return;
     }
     setSaving(true);
+    setSaveError(null);
+    const sent: AgentConfig = { ...config, display_name: config.display_name.trim() };
     try {
-      const saved = await saveAgentSettings(supabase, agent.key, {
-        config: { ...config, display_name: config.display_name.trim() },
-      });
-      setConfig(parseAgentConfig(saved.config, limits));
+      const saved = await saveAgentSettings(supabase, agent.key, { config: sent });
+      const stored = parseAgentConfig(saved.config, limits);
+      // Se comprueba lo que REALMENTE quedó en la base: nada se pierde en silencio.
+      if (!sameIds(sent.quick_reply_ids, stored.quick_reply_ids)) {
+        throw new Error("Las respuestas rápidas elegidas no se guardaron. Vuelve a abrir el panel e inténtalo de nuevo.");
+      }
+      const notes = describeAdjustments(sent, stored);
+      setConfig(stored);
+      setSavedConfig(stored);
       invalidateAgentNames();
       onSaved(saved);
-      toast.success("Cambios guardados");
+      if (notes.length) toast.success(`Cambios guardados. Ajustamos a lo permitido: ${notes.join(", ")}.`);
+      else toast.success("Cambios guardados");
     } catch (error) {
-      toast.error(errorMessage(error, "No se pudieron guardar los cambios"));
+      const message = errorMessage(error, "No se pudieron guardar los cambios");
+      setSaveError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -402,10 +438,20 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
       </fieldset>
 
       {canEdit && (
-        <div className="flex justify-end gap-2 border-t px-5 py-3">
-          <Button onClick={() => void save()} disabled={saving}>
-            {saving ? "Guardando…" : "Guardar"}
-          </Button>
+        <div className="space-y-2 border-t px-5 py-3">
+          {saveError && (
+            <p role="alert" className="rounded-lg bg-error-suave px-3 py-2 text-sm text-error-texto">
+              {saveError}
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-3">
+            <span className="text-xs text-texto-suave" aria-live="polite">
+              {dirty ? "Cambios sin guardar" : "Todo guardado"}
+            </span>
+            <Button onClick={() => void save()} disabled={saving || !dirty}>
+              {saving ? "Guardando…" : "Guardar"}
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -482,7 +528,12 @@ function NumberField({
         min={min}
         max={max}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          // Un valor válido cuenta de inmediato (no hay que salir del campo para que «Guardar» lo vea).
+          const n = Number(e.target.value);
+          if (e.target.value !== "" && Number.isInteger(n) && n >= min && n <= max) onChange(n);
+        }}
         onBlur={() => {
           const n = Number(text);
           const clamped = Number.isFinite(n) ? Math.min(Math.max(Math.round(n), min), max) : value;

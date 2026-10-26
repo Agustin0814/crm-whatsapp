@@ -20,6 +20,22 @@ type ResponsesBody = {
 };
 
 /**
+ * Qué parámetros acepta cada familia de modelos. Mandar uno no admitido
+ * provoca HTTP 400 `unsupported_parameter`, así que se omite:
+ *  - razonamiento (gpt-5*, o1/o3/o4…): aceptan `reasoning.effort`, NO `temperature`;
+ *    la serie o no admite «minimal» (se usa «low»). Los «gpt-5…-chat» no razonan.
+ *  - el resto (gpt-4.1, gpt-4o…): aceptan `temperature`, NO `reasoning`.
+ */
+export function modelCapabilities(model: string): { reasoning: boolean; minimalEffort: boolean; temperature: boolean } {
+  const m = model.trim().toLowerCase();
+  const isGpt5 = /^gpt-5/.test(m);
+  const isOSeries = /^o\d/.test(m);
+  const isChatVariant = /chat/.test(m);
+  const reasoning = (isGpt5 || isOSeries) && !isChatVariant;
+  return { reasoning, minimalEffort: isGpt5 && reasoning, temperature: !reasoning };
+}
+
+/**
  * Implementación con la Responses API de OpenAI (fetch, sin SDK).
  * La clave OPENAI_API_KEY solo existe en el servidor y nunca se registra.
  * `store: false`: OpenAI no guarda la conversación del cliente.
@@ -41,10 +57,15 @@ export const openAiProvider: ModelProvider = {
       tool_choice: "required",
       parallel_tool_calls: false,
       max_output_tokens: limits.maxOutputTokens,
-      reasoning: { effort: limits.reasoningEffort },
       store: false,
     };
-    if (limits.temperature !== null) payload.temperature = limits.temperature;
+    // Solo los parámetros que el modelo elegido admite (ver modelCapabilities).
+    const caps = modelCapabilities(limits.model);
+    if (caps.reasoning) {
+      const effort = limits.reasoningEffort === "minimal" && !caps.minimalEffort ? "low" : limits.reasoningEffort;
+      payload.reasoning = { effort };
+    }
+    if (caps.temperature && limits.temperature !== null) payload.temperature = limits.temperature;
 
     let response: Response;
     try {

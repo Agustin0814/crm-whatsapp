@@ -7,6 +7,16 @@ import { useCrm } from "@/components/crm/crm-provider";
 import { EmptyState } from "@/components/crm/empty-state";
 import { PageHeader } from "@/components/crm/page-header";
 import { AgentsSkeleton } from "@/components/crm/section-skeletons";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -71,6 +81,9 @@ export function AgentsView() {
   const [configId, setConfigId] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  // Cambios sin guardar de cada pestaña del panel (cliente y proveedor).
+  const [dirty, setDirty] = useState({ config: false, locked: false });
+  const [confirmClose, setConfirmClose] = useState(false);
 
   const load = useCallback(async () => {
     const list = await fetchAgents(supabase);
@@ -131,7 +144,23 @@ export function AgentsView() {
     }
   }
 
+  /** Cerrar el panel con cambios sin guardar pide confirmación (nunca se pierden en silencio). */
+  function handleConfigOpenChange(open: boolean) {
+    if (!open && (dirty.config || dirty.locked)) {
+      setConfirmClose(true);
+      return;
+    }
+    setConfigOpen(open);
+  }
+
+  function discardAndClose() {
+    setConfirmClose(false);
+    setDirty({ config: false, locked: false });
+    setConfigOpen(false);
+  }
+
   function openConfig(agent: Agent) {
+    setDirty({ config: false, locked: false });
     setConfigId(agent.id);
     setConfigOpen(true);
   }
@@ -312,7 +341,7 @@ export function AgentsView() {
       </div>
 
       {/* Panel de configuración del agente elegido */}
-      <Sheet open={configOpen} onOpenChange={setConfigOpen}>
+      <Sheet open={configOpen} onOpenChange={handleConfigOpenChange}>
         <SheetContent side="right" className="w-full gap-0 sm:max-w-xl">
           <SheetHeader className="border-b px-5 py-4">
             <SheetTitle className="text-lg">{configAgent ? `Configurar ${configAgent.name}` : "Configurar agente"}</SheetTitle>
@@ -325,10 +354,12 @@ export function AgentsView() {
               <TabsList variant="line" className="w-full justify-start border-b px-5">
                 <TabsTrigger value="config" className="flex-none">
                   Configuración
+                  {dirty.config && <UnsavedDot />}
                 </TabsTrigger>
                 {isSuperadmin && (
                   <TabsTrigger value="locked" className="flex-none">
                     Proveedor
+                    {dirty.locked && <UnsavedDot />}
                   </TabsTrigger>
                 )}
                 <TabsTrigger value="tester" className="flex-none" disabled>
@@ -338,12 +369,16 @@ export function AgentsView() {
                   </Badge>
                 </TabsTrigger>
               </TabsList>
-              <TabsContent value="config" className="flex min-h-0 flex-1 flex-col">
+              {/* forceMount: las dos pestañas siguen montadas al cambiar entre ellas, así
+                  lo que se editó en una NO se pierde al ir a la otra (antes Radix las
+                  desmontaba y los cambios sin guardar desaparecían sin aviso). */}
+              <TabsContent forceMount value="config" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
                 <AgentConfigForm
                   key={configAgent.updated_at}
                   agent={configAgent}
                   limits={limitsById[configAgent.id] ?? DEFAULT_LIMITS}
                   canEdit={isAdmin}
+                  onDirtyChange={(d) => setDirty((prev) => (prev.config === d ? prev : { ...prev, config: d }))}
                   onSaved={(saved) => {
                     replaceAgent(saved);
                     setReloadKey((k) => k + 1);
@@ -351,14 +386,40 @@ export function AgentsView() {
                 />
               </TabsContent>
               {isSuperadmin && (
-                <TabsContent value="locked" className="flex min-h-0 flex-1 flex-col">
-                  <LockedConfigForm agentId={configAgent.id} onSaved={() => setReloadKey((k) => k + 1)} />
+                <TabsContent forceMount value="locked" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+                  <LockedConfigForm
+                    agentId={configAgent.id}
+                    onDirtyChange={(d) => setDirty((prev) => (prev.locked === d ? prev : { ...prev, locked: d }))}
+                    onSaved={() => setReloadKey((k) => k + 1)}
+                  />
                 </TabsContent>
               )}
             </Tabs>
           )}
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Tienes cambios sin guardar</AlertDialogTitle>
+            <AlertDialogDescription>
+              {dirty.config && dirty.locked
+                ? "Hay cambios sin guardar en «Configuración» y en «Proveedor»."
+                : dirty.locked
+                  ? "Hay cambios sin guardar en «Proveedor»."
+                  : "Hay cambios sin guardar en «Configuración»."}{" "}
+              Cada pestaña se guarda con su propio botón «Guardar».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Seguir editando</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={discardAndClose}>
+              Descartar cambios
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Registro de actividad (todos los agentes) */}
       {isAdmin && (
@@ -445,6 +506,16 @@ function ConfigureButton({ agent, onConfigure, className }: RowProps & { classNa
     <Button variant="outline" size="sm" onClick={onConfigure} className={className} aria-label={`Configurar ${agent.name}`}>
       <Settings2Icon aria-hidden /> Configurar
     </Button>
+  );
+}
+
+/** Punto de «cambios sin guardar» en la pestaña del panel. */
+function UnsavedDot() {
+  return (
+    <>
+      <span className="size-1.5 rounded-full bg-marca" aria-hidden />
+      <span className="sr-only">(cambios sin guardar)</span>
+    </>
   );
 }
 
