@@ -17,11 +17,6 @@ export type LinkWithRoles = PersonCompanyLink & {
   contact: Pick<Contact, "id" | "name" | "wa_id" | "phone" | "classification"> | null;
 };
 
-export const PAYMENT_TERMS_LABELS: Record<string, string> = {
-  contado: "Contado",
-  credito: "Crédito",
-};
-
 const COMPANY_SELECT = "*, company_tags(tags(*))" as const;
 const LINK_SELECT =
   "*, link_roles(contact_roles(*)), companies(id, trade_name, classification), contacts(id, name, wa_id, phone, classification)" as const;
@@ -73,10 +68,7 @@ export async function searchCompanies(
   return data;
 }
 
-/**
- * Crea una empresa. Para un usuario que no es administrador la base fuerza
- * «contado» sin crédito aunque se envíe otra cosa.
- */
+/** Crea una empresa solo con datos comerciales (sin teléfono: ese pasa por create_company). */
 export async function createCompany(
   supabase: BrowserClient,
   values: TablesInsert<"companies">,
@@ -91,7 +83,10 @@ export async function updateCompany(
   id: string,
   patch: TablesUpdate<"companies">,
 ): Promise<CompanyWithTags> {
-  const { data, error } = await supabase.from("companies").update(patch).eq("id", id).select(COMPANY_SELECT).single();
+  // El teléfono solo se cambia con verificación de duplicados (rpc update_phone).
+  const { phone: _phone, ...safePatch } = patch;
+  void _phone;
+  const { data, error } = await supabase.from("companies").update(safePatch).eq("id", id).select(COMPANY_SELECT).single();
   if (error) throw error;
   return normalizeCompany(data as unknown as RawCompany);
 }
@@ -124,7 +119,7 @@ export async function fetchLinks(
 
 /**
  * Vincula una persona con una empresa. Si ya hubo un vínculo (desactivado), se
- * reactiva en lugar de duplicarlo. Los permisos de pedido los da un administrador.
+ * reactiva en lugar de duplicarlo.
  */
 export async function linkContactToCompany(supabase: BrowserClient, contactId: string, companyId: string) {
   const { data: existing, error: findError } = await supabase
@@ -148,19 +143,9 @@ export async function linkContactToCompany(supabase: BrowserClient, contactId: s
   return data.id;
 }
 
-/** Desvincular = desactivar (se conserva el historial de pedidos hechos por esa persona). */
+/** Desvincular = desactivar (se conserva el historial). */
 export async function setLinkActive(supabase: BrowserClient, linkId: string, active: boolean) {
   const { error } = await supabase.from("person_company_links").update({ is_active: active }).eq("id", linkId);
-  if (error) throw error;
-}
-
-/** Permisos de pedido del vínculo. La base solo los acepta de un administrador. */
-export async function updateLinkPermissions(
-  supabase: BrowserClient,
-  linkId: string,
-  patch: Pick<TablesUpdate<"person_company_links">, "can_order" | "order_limit" | "requires_authorization">,
-) {
-  const { error } = await supabase.from("person_company_links").update(patch).eq("id", linkId);
   if (error) throw error;
 }
 

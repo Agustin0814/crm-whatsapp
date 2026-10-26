@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleHelpIcon } from "lucide-react";
+import { BotIcon, CircleHelpIcon } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { EmptyState } from "@/components/crm/empty-state";
@@ -128,6 +128,11 @@ function MessageBubble({
             : "mt-1 text-texto-suave",
       )}
     >
+      {message.sent_by_agent && (
+        <span className="mr-1 flex items-center gap-0.5 font-medium">
+          <BotIcon className="size-3" aria-hidden /> Asistente
+        </span>
+      )}
       <time dateTime={time}>{formatTime(time)}</time>
       {outbound && <MessageStatus message={message} />}
     </div>

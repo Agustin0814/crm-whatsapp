@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/auth";
+import { isAdminRole } from "@/lib/crm/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // Gestión de usuarios (solo admin). Usa la service role ÚNICAMENTE después de
@@ -97,8 +98,16 @@ export async function DELETE(request: NextRequest) {
 
   const admin = createAdminClient();
   const { data: target } = await admin.from("profiles").select("role").eq("id", id).maybeSingle();
-  if (target?.role === "admin") {
-    const { count } = await admin.from("profiles").select("id", { count: "exact", head: true }).eq("role", "admin");
+  // Al proveedor (superadmin) solo lo puede eliminar otro superadmin.
+  if (target?.role === "superadmin") {
+    const { data: requester } = await admin.from("profiles").select("role").eq("id", check.userId).maybeSingle();
+    if (requester?.role !== "superadmin") return deny(403, "Solo el proveedor puede eliminar esta cuenta");
+  }
+  if (isAdminRole(target?.role)) {
+    const { count } = await admin
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .in("role", ["admin", "superadmin"]);
     if ((count ?? 0) <= 1) return deny(400, "Debe quedar al menos un administrador");
   }
 

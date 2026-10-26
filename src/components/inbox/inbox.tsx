@@ -176,7 +176,11 @@ export function Inbox() {
       const patchItem = (c: ConversationItem) => (c.id === id ? { ...c, unread_count: 0 } : c);
       setItems((prev) => prev.map(patchItem));
       setCurrent((prev) => (prev ? patchItem(prev) : prev));
-      const { error } = await supabase.from("conversations").update({ unread_count: 0 }).eq("id", id);
+      // human_seen_at: el asistente en automático no responde si una persona ya vio el chat.
+      const { error } = await supabase
+        .from("conversations")
+        .update({ unread_count: 0, human_seen_at: new Date().toISOString() })
+        .eq("id", id);
       if (error) toast.error("No se pudo marcar como leída");
     },
     [supabase],

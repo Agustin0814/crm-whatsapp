@@ -12,9 +12,11 @@ export async function updateContact(
   contactId: string,
   patch: TablesUpdate<"contacts">,
 ): Promise<ContactWithTags> {
-  // wa_id nunca se edita desde la interfaz (lo controla el webhook).
-  const { wa_id: _ignored, ...safePatch } = patch;
-  void _ignored;
+  // wa_id nunca se edita desde la interfaz (lo controla el webhook) y el
+  // teléfono solo se cambia con verificación de duplicados (rpc update_phone).
+  const { wa_id: _waId, phone: _phone, ...safePatch } = patch;
+  void _waId;
+  void _phone;
   const { data, error } = await supabase
     .from("contacts")
     .update(safePatch)
@@ -58,28 +60,6 @@ export function isUniqueViolation(error: unknown): boolean {
   return !!error && typeof error === "object" && "code" in error && (error as { code: unknown }).code === "23505";
 }
 
-/**
- * Contacto que ya usa ese teléfono (misma normalización que el índice único:
- * 10 dígitos, 52 + 10 o 521 + 10 son el mismo número). Sirve para explicar un
- * duplicado con un enlace en lugar de un error técnico.
- */
-export async function findContactByPhone(
-  supabase: BrowserClient,
-  phone: string,
-  excludeId?: string,
-): Promise<Pick<Contact, "id" | "name"> | null> {
-  const { data: canonical, error: normError } = await supabase.rpc("normalize_phone", { p: phone });
-  if (normError || !canonical) return null;
-  let query = supabase
-    .from("contacts")
-    .select("id, name")
-    .or(`phone_canonical.eq.${canonical},wa_id.eq.${canonical}`)
-    .limit(1);
-  if (excludeId) query = query.neq("id", excludeId);
-  const { data } = await query.maybeSingle();
-  return data;
-}
-
 /** Mensaje de error legible a partir de un error de Supabase. */
 export function errorMessage(error: unknown, fallback = "Ocurrió un error"): string {
   if (error && typeof error === "object" && "code" in error) {
@@ -93,4 +73,12 @@ export function errorMessage(error: unknown, fallback = "Ocurrió un error"): st
     if (msg) return msg;
   }
   return fallback;
+}
+
+/**
+ * Abre la ficha de una persona o empresa como panel lateral en /contactos
+ * (no hay páginas de detalle). `editar` lleva el foco a la sección Datos.
+ */
+export function entityPanelHref(kind: "person" | "company", id: string, editar = false): string {
+  return `/contactos?ficha=${kind === "person" ? "persona" : "empresa"}.${id}${editar ? "&editar=1" : ""}`;
 }

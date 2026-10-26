@@ -1,6 +1,6 @@
 "use client";
 
-import { PencilIcon, Trash2Icon, ZapIcon } from "lucide-react";
+import { BotIcon, PencilIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import { Icon } from "@/components/ui/icon";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -17,13 +17,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { isQuickReplyPermission, QUICK_REPLY_PERMISSION_LABELS } from "@/lib/agents/config";
 import { errorMessage } from "@/lib/crm/contacts";
 import type { QuickReply } from "@/lib/crm/types";
 import { createClient } from "@/lib/supabase/client";
-import { QuickReplyDialog } from "./quick-reply-dialog";
+import { QuickReplyDialog, type QuickReplyValues } from "./quick-reply-dialog";
 
 export function QuickRepliesView() {
   const supabase = createClient();
@@ -59,7 +61,7 @@ export function QuickRepliesView() {
     if (data) setReplies(data);
   }
 
-  async function save(values: { shortcut: string; body: string }): Promise<boolean> {
+  async function save(values: QuickReplyValues): Promise<boolean> {
     const reply = editing?.reply;
     const { error } = reply
       ? await supabase.from("quick_replies").update(values).eq("id", reply.id)
@@ -155,6 +157,11 @@ export function QuickRepliesView() {
                       )}
                     </div>
                     <p className="line-clamp-4 flex-1 text-sm whitespace-pre-wrap text-muted-foreground">{reply.body}</p>
+                    {reply.agent_permission !== "human_only" && isQuickReplyPermission(reply.agent_permission) && (
+                      <Badge variant="secondary" className="w-fit gap-1">
+                        <BotIcon aria-hidden /> Asistente: {QUICK_REPLY_PERMISSION_LABELS[reply.agent_permission].toLowerCase()}
+                      </Badge>
+                    )}
                     {author && <p className="text-xs text-muted-foreground">Creada por {profileName(author)}</p>}
                   </CardContent>
                 </Card>

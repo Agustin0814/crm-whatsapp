@@ -41,8 +41,6 @@ type Props = ConversationActionsHandlers & {
   /** Botón disparador; por defecto, un icono de "más". */
   triggerClassName?: string;
   align?: "start" | "end";
-  /** Solo en el encabezado del chat: abre el diálogo de pedido. */
-  onNewOrder?: () => void;
 };
 
 /** Menú de acciones de una conversación (lista y encabezado del chat). */
@@ -53,7 +51,6 @@ export function ConversationActionsMenu({
   onToggleTag,
   triggerClassName,
   align = "end",
-  onNewOrder,
 }: Props) {
   const { profiles, tags } = useCrm();
   const tagIds = new Set(conversation.contact?.tags.map((t) => t.id));
@@ -71,14 +68,6 @@ export function ConversationActionsMenu({
         <TooltipContent>Más acciones</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align={align} className="w-56">
-        {onNewOrder && (
-          <>
-            <DropdownMenuItem onSelect={onNewOrder}>
-              <Icon name="agregar" /> Nuevo pedido
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        )}
         <DropdownMenuItem onSelect={() => onUpdate({ is_pinned: !conversation.is_pinned })}>
           {conversation.is_pinned ? <PinOffIcon /> : <PinIcon />}
           {conversation.is_pinned ? "Desfijar" : "Fijar arriba"}

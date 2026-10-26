@@ -1,13 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { useCrm } from "@/components/crm/crm-provider";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -15,19 +12,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   fetchLinks,
   linkContactToCompany,
   setLinkActive,
   setLinkRole,
-  updateLinkPermissions,
   type LinkWithRoles,
 } from "@/lib/crm/companies";
 import { errorMessage } from "@/lib/crm/contacts";
-import { formatMoney, formatPhone } from "@/lib/format";
+import { LINKS_CHANGED_EVENT, notifyLinksChanged } from "@/lib/crm/phones";
+import { formatPhone } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { CompanyPicker } from "./company-picker";
@@ -37,28 +31,17 @@ type Props =
   | { mode: "contact"; contactId: string; onChanged?: () => void }
   | { mode: "company"; companyId: string; onChanged?: () => void };
 
-/** Resumen legible de los permisos de pedido de un vínculo. */
-export function permissionSummary(link: Pick<LinkWithRoles, "can_order" | "order_limit" | "requires_authorization">) {
-  if (!link.can_order) return "No puede hacer pedidos a nombre de la empresa";
-  const parts = ["Puede pedir"];
-  if (link.order_limit !== null) parts.push(`hasta ${formatMoney(link.order_limit)} por pedido`);
-  if (link.requires_authorization) parts.push("siempre requiere autorización");
-  return parts.join(" · ");
-}
-
 /**
  * Vínculos persona–empresa con sus funciones. Desde la persona se ven sus
  * empresas; desde la empresa, sus contactos. Cualquiera puede vincular,
- * desvincular (se desactiva, no se borra) y asignar funciones; los permisos de
- * pedido (puede pedir, límite, autorización) solo los cambia un administrador,
- * y la base lo vuelve a comprobar.
+ * desvincular (se desactiva, no se borra) y asignar funciones. Sin permisos
+ * de compra: esto es un CRM, no un ERP.
  */
 export function CompanyLinks(props: Props) {
   const supabase = createClient();
-  const { roles, isAdmin } = useCrm();
+  const { roles } = useCrm();
   const [links, setLinks] = useState<LinkWithRoles[] | null>(null);
   const [showInactive, setShowInactive] = useState(false);
-  const [editing, setEditing] = useState<LinkWithRoles | null>(null);
   const key = props.mode === "contact" ? props.contactId : props.companyId;
   const { mode, onChanged } = props;
 
@@ -71,6 +54,10 @@ export function CompanyLinks(props: Props) {
 
   useEffect(() => {
     void load();
+    // Vínculos creados desde otro lugar (aviso del chat, alta con «vincular»).
+    const onChanged = () => void load();
+    window.addEventListener(LINKS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(LINKS_CHANGED_EVENT, onChanged);
   }, [load]);
 
   async function run(action: () => Promise<unknown>, success: string, fallback: string): Promise<boolean> {
@@ -81,7 +68,7 @@ export function CompanyLinks(props: Props) {
       return false;
     }
     toast.success(success);
-    await load();
+    notifyLinksChanged(); // recarga esta lista y el aviso del chat
     onChanged?.();
     return true;
   }
@@ -129,9 +116,7 @@ export function CompanyLinks(props: Props) {
             key={link.id}
             link={link}
             mode={mode}
-            isAdmin={isAdmin}
             onToggleRole={(roleId, on) => void toggleRole(link, roleId, on)}
-            onEditPermissions={() => setEditing(link)}
             onSetActive={(on) =>
               void run(
                 () => setLinkActive(supabase, link.id, on),
@@ -174,21 +159,6 @@ export function CompanyLinks(props: Props) {
         )}
       </div>
 
-      {editing && (
-        <PermissionsDialog
-          link={editing}
-          onClose={() => setEditing(null)}
-          onSave={(patch) =>
-            run(
-              () => updateLinkPermissions(supabase, editing.id, patch),
-              "Permisos actualizados",
-              "No se pudieron guardar los permisos",
-            ).then((ok) => {
-              if (ok) setEditing(null);
-            })
-          }
-        />
-      )}
     </div>
   );
 }
@@ -196,16 +166,12 @@ export function CompanyLinks(props: Props) {
 function LinkRow({
   link,
   mode,
-  isAdmin,
   onToggleRole,
-  onEditPermissions,
   onSetActive,
 }: {
   link: LinkWithRoles;
   mode: "contact" | "company";
-  isAdmin: boolean;
   onToggleRole: (roleId: string, on: boolean) => void;
-  onEditPermissions: () => void;
   onSetActive: (on: boolean) => void;
 }) {
   const { roles } = useCrm();
@@ -213,13 +179,11 @@ function LinkRow({
   const other =
     mode === "contact"
       ? {
-          href: `/contactos/empresa/${link.company_id}`,
           name: link.company?.trade_name ?? "Empresa",
           sub: null as string | null,
           avatar: <ContactAvatar seed={link.company_id} name={link.company?.trade_name} company={link.company?.trade_name} size="sm" />,
         }
       : {
-          href: `/contactos/persona/${link.contact_id}`,
           name: link.contact?.name || "Sin nombre",
           sub: formatPhone(link.contact?.wa_id ?? link.contact?.phone),
           avatar: <ContactAvatar seed={link.contact?.wa_id ?? link.contact_id} name={link.contact?.name} size="sm" />,
@@ -231,9 +195,7 @@ function LinkRow({
         {other.avatar}
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-x-2">
-            <Link href={other.href} className="truncate font-medium hover:underline">
-              {other.name}
-            </Link>
+            <span className="truncate font-medium">{other.name}</span>
             {other.sub && <span className="text-xs text-texto-suave tabular-nums">{other.sub}</span>}
             {!link.is_active && <span className="text-xs text-texto-suave">(inactivo)</span>}
           </div>
@@ -268,101 +230,13 @@ function LinkRow({
               </DropdownMenu>
             )}
           </div>
-          <p className="text-xs text-texto-suave">{permissionSummary(link)}</p>
         </div>
       </div>
       <div className="mt-2 flex flex-wrap justify-end gap-1">
-        {isAdmin && link.is_active && (
-          <Button variant="ghost" size="sm" onClick={onEditPermissions}>
-            Permisos de pedido
-          </Button>
-        )}
         <Button variant="ghost" size="sm" onClick={() => onSetActive(!link.is_active)}>
           {link.is_active ? "Desvincular" : "Reactivar"}
         </Button>
       </div>
     </li>
-  );
-}
-
-function PermissionsDialog({
-  link,
-  onClose,
-  onSave,
-}: {
-  link: LinkWithRoles;
-  onClose: () => void;
-  onSave: (patch: { can_order: boolean; order_limit: number | null; requires_authorization: boolean }) => Promise<void>;
-}) {
-  const [canOrder, setCanOrder] = useState(link.can_order);
-  const [limit, setLimit] = useState(link.order_limit === null ? "" : String(link.order_limit));
-  const [requiresAuth, setRequiresAuth] = useState(link.requires_authorization);
-  const [saving, setSaving] = useState(false);
-  const limitValue = limit.trim() === "" ? null : Number(limit);
-  const limitInvalid = limitValue !== null && (!Number.isFinite(limitValue) || limitValue < 0);
-
-  async function save() {
-    if (limitInvalid) return;
-    setSaving(true);
-    try {
-      await onSave({ can_order: canOrder, order_limit: canOrder ? limitValue : null, requires_authorization: requiresAuth });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(v) => !v && !saving && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Permisos de pedido</DialogTitle>
-          <DialogDescription>
-            {link.contact?.name || "Esta persona"} en {link.company?.trade_name ?? "la empresa"}. Solo un administrador
-            puede cambiarlos.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <label className="flex items-center justify-between gap-3">
-            <span>
-              <span className="block font-medium">Puede hacer pedidos</span>
-              <span className="block text-xs text-texto-suave">A nombre de la empresa.</span>
-            </span>
-            <Switch checked={canOrder} onCheckedChange={setCanOrder} />
-          </label>
-          <div className={cn("space-y-1.5", !canOrder && "opacity-50")}>
-            <Label htmlFor={`limite-${link.id}`}>Límite por pedido (MXN, vacío = sin límite)</Label>
-            <Input
-              id={`limite-${link.id}`}
-              type="number"
-              inputMode="decimal"
-              min={0}
-              step="0.01"
-              value={limit}
-              disabled={!canOrder}
-              onChange={(e) => setLimit(e.target.value)}
-              aria-invalid={limitInvalid}
-            />
-            {limitInvalid && <p className="text-xs text-error-texto">Escribe un monto válido.</p>}
-          </div>
-          <label className="flex items-start gap-3">
-            <Checkbox checked={requiresAuth} onCheckedChange={(v) => setRequiresAuth(v === true)} className="mt-0.5" />
-            <span>
-              <span className="block font-medium">Requiere autorización siempre</span>
-              <span className="block text-xs text-texto-suave">
-                Sus pedidos quedan «pendientes de autorización» hasta que un administrador los apruebe.
-              </span>
-            </span>
-          </label>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancelar
-          </Button>
-          <Button onClick={() => void save()} disabled={saving || limitInvalid}>
-            {saving ? "Guardando…" : "Guardar"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

@@ -48,7 +48,7 @@ async function fetchUsers(): Promise<AdminUser[] | null> {
 /** Lista de usuarios con cambio de rol, alta y baja (solo admin). */
 export function UsersAdmin() {
   const supabase = createClient();
-  const { me, reloadProfiles } = useCrm();
+  const { me, isSuperadmin, reloadProfiles } = useCrm();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState<number | null>(null);
@@ -148,18 +148,25 @@ export function UsersAdmin() {
                       {user.last_sign_in_at ? formatDate(user.last_sign_in_at) : "Nunca"}
                     </TableCell>
                     <TableCell>
-                      <Select value={user.role} onValueChange={(v) => void changeRole(user, v as Role)}>
+                      <Select
+                        value={user.role}
+                        onValueChange={(v) => void changeRole(user, v as Role)}
+                        disabled={user.role === "superadmin" && !isSuperadmin}
+                      >
                         <SelectTrigger size="sm" className="w-36" aria-label={`Rol de ${user.full_name ?? user.email}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent position="popper">
                           <SelectItem value="agent">{ROLE_LABELS.agent}</SelectItem>
                           <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
+                          {(isSuperadmin || user.role === "superadmin") && (
+                            <SelectItem value="superadmin">{ROLE_LABELS.superadmin}</SelectItem>
+                          )}
                         </SelectContent>
                       </Select>
                     </TableCell>
                     <TableCell>
-                      {user.id !== me?.id && (
+                      {user.id !== me?.id && (user.role !== "superadmin" || isSuperadmin) && (
                         <Button
                           variant="ghost"
                           size="icon-sm"

@@ -6,7 +6,9 @@ type ServerEnvName =
   | "WHATSAPP_BUSINESS_ACCOUNT_ID"
   | "WHATSAPP_VERIFY_TOKEN"
   | "WHATSAPP_APP_SECRET"
-  | "SUPABASE_SERVICE_ROLE_KEY";
+  | "SUPABASE_SERVICE_ROLE_KEY"
+  | "OPENAI_API_KEY"
+  | "CRON_SECRET";
 
 /**
  * Lee una variable de entorno del servidor y falla si no existe.

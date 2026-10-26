@@ -72,8 +72,9 @@ function redirectWithCookies(
 
 export const config = {
   matcher: [
-    // Todo excepto archivos estáticos (imágenes, sonidos, manifest) y el webhook
-    // de Meta (no tiene sesión; se protege con la firma X-Hub-Signature-256).
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|api/whatsapp/webhook|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp3)$).*)",
+    // Todo excepto archivos estáticos (imágenes, sonidos, manifest), el webhook
+    // de Meta (no tiene sesión; se protege con la firma X-Hub-Signature-256) y
+    // el procesador de agentes (lo llama pg_cron; se protege con CRON_SECRET).
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|api/whatsapp/webhook|api/agents/run|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp3)$).*)",
   ],
 };

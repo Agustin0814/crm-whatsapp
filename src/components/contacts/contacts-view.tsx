@@ -9,7 +9,6 @@ import { ClassificationBadge } from "@/components/crm/classification-badge";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { useCrm } from "@/components/crm/crm-provider";
 import { EmptyState } from "@/components/crm/empty-state";
-import { PageHeader } from "@/components/crm/page-header";
 import { TagChip } from "@/components/crm/tag-chip";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -25,13 +24,15 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { errorMessage } from "@/lib/crm/contacts";
 import type { Tables } from "@/lib/supabase/database.types";
-import { formatPhone, formatRelative } from "@/lib/format";
+import { formatDate, formatPhone, formatRelative } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { CONTACTS_CHANGED_EVENT } from "@/lib/crm/purchases";
+import { EntityPanel, type PanelTarget } from "./entity-panel";
 import { NewEntryDialog, type NewEntryPreset } from "./new-entry-dialog";
+import { SummaryCards } from "./summary-cards";
 
 const PAGE_SIZE = 25;
 /** Filas que entran escalonadas (30 ms entre una y otra) en la primera carga. */
@@ -51,8 +52,10 @@ const TABS = [
 ] as const;
 type Activity = "all" | "active" | "inactive";
 
-function hrefFor(row: DirectoryRow): string {
-  return row.kind === "company" ? `/contactos/empresa/${row.id}` : `/contactos/persona/${row.id}`;
+/** «persona.<uuid>» / «empresa.<uuid>» (parámetro ?ficha=) → ficha a abrir en el panel. */
+function parseFicha(value: string | null, editar: boolean): PanelTarget | null {
+  const match = /^(persona|empresa)\.([0-9a-f-]{36})$/i.exec(value ?? "");
+  return match ? { kind: match[1] === "persona" ? "person" : "company", id: match[2], editar } : null;
 }
 
 /**
@@ -68,6 +71,8 @@ export function ContactsView() {
   const { tags, roles } = useCrm();
 
   const requestedTab = searchParams.get("tab");
+  // La ficha abierta vive en la URL (?ficha=): se puede enlazar y no cambia de página.
+  const panel = parseFicha(searchParams.get("ficha"), searchParams.get("editar") === "1");
   const tab = TABS.find((t) => t.value === requestedTab) ?? TABS[0];
   const [activity, setActivity] = useState<Activity>("all");
   const [searchInput, setSearchInput] = useState("");
@@ -81,6 +86,8 @@ export function ContactsView() {
   const [loadCount, setLoadCount] = useState(0);
   const [preset, setPreset] = useState<NewEntryPreset | null>(null);
   const [now, setNow] = useState<number | null>(null);
+  /** Se incrementa para volver a pedir la página actual (tras registrar una compra, etc.). */
+  const [reloadKey, setReloadKey] = useState(0);
   const requestRef = useRef(0);
 
   // Reloj para «hace 3 días» (se actualiza cada minuto).
@@ -135,12 +142,32 @@ export function ContactsView() {
         setLoading(false);
         setLoadCount((n) => n + 1);
       });
-  }, [supabase, search, tab.kind, tab.classification, effectiveActivity, tagIds, roleIds, page]);
+  }, [supabase, search, tab.kind, tab.classification, effectiveActivity, tagIds, roleIds, page, reloadKey]);
+
+  // Cambios hechos en otro lugar (compras, reclasificación) refrescan la lista.
+  useEffect(() => {
+    const onChanged = () => setReloadKey((k) => k + 1);
+    window.addEventListener(CONTACTS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CONTACTS_CHANGED_EVENT, onChanged);
+  }, []);
 
   function changeTab(value: string) {
+    if (value === tab.value) return; // misma pestaña: no hay nada que recargar
     setLoading(true);
     setPage(0);
-    router.replace(value === "todos" ? pathname : `${pathname}?tab=${value}`, { scroll: false });
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === "todos") params.delete("tab");
+    else params.set("tab", value);
+    router.replace(params.size ? `${pathname}?${params}` : pathname, { scroll: false });
+  }
+
+  /** Abre (o cierra con null) la ficha en el panel lateral, conservando filtros. */
+  function openPanel(target: { kind: "person" | "company"; id: string } | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("editar");
+    if (target) params.set("ficha", `${target.kind === "person" ? "persona" : "empresa"}.${target.id}`);
+    else params.delete("ficha");
+    router.replace(params.size ? `${pathname}?${params}` : pathname, { scroll: false });
   }
 
   function changeFilter(apply: () => void) {
@@ -155,33 +182,15 @@ export function ContactsView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageHeader
-        title="Contactos"
-        description="Personas y empresas: prospectos, clientes y proveedores."
-        actions={
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button>
-                <Icon name="agregar" /> Nuevo
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onSelect={() => setPreset({ kind: "person", classification: "unclassified" })}>
-                <Icon name="persona" /> Persona
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setPreset({ kind: "company", classification: "unclassified" })}>
-                <Icon name="empresa" /> Empresa
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setPreset({ kind: "company", classification: "supplier" })}>
-                <Icon name="planta" /> Proveedor
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        }
-      />
+      {/* El menú lateral ya dice «Contactos»: el título queda solo para lectores de pantalla */}
+      <h1 className="sr-only">Contactos</h1>
+
+      <div className="px-4 pt-4 md:px-6">
+        <SummaryCards activeTab={tab.value} onSelect={changeTab} />
+      </div>
 
       <Tabs value={tab.value} onValueChange={changeTab} className="gap-0">
-        <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b px-4 md:px-6">
+        <div className="mt-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b px-4 md:px-6">
           <TabsList variant="line" className="h-11">
             {TABS.map((t) => (
               <TabsTrigger key={t.value} value={t.value} className="px-3">
@@ -256,6 +265,24 @@ export function ContactsView() {
             Limpiar
           </Button>
         )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button className="ml-auto">
+              <Icon name="agregar" /> Nuevo
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onSelect={() => setPreset({ kind: "person", classification: "unclassified" })}>
+              <Icon name="persona" /> Persona
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setPreset({ kind: "company", classification: "unclassified" })}>
+              <Icon name="empresa" /> Empresa
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setPreset({ kind: "company", classification: "supplier" })}>
+              <Icon name="planta" /> Proveedor
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -285,6 +312,7 @@ export function ContactsView() {
                 <TableHead className="hidden xl:table-cell">Tipo</TableHead>
                 <TableHead className="hidden lg:table-cell">Empresa / contactos</TableHead>
                 <TableHead>Clasificación</TableHead>
+                <TableHead className="hidden sm:table-cell">Compras</TableHead>
                 <TableHead className="hidden md:table-cell">Etiquetas</TableHead>
                 <TableHead className="hidden xl:table-cell">Funciones</TableHead>
                 <TableHead className="hidden sm:table-cell">Última interacción</TableHead>
@@ -307,13 +335,16 @@ export function ContactsView() {
                         key={`${row.kind}-${row.id}`}
                         className={cn("cursor-pointer", stagger && "entrada-fila")}
                         style={stagger ? ({ "--i": index } as CSSProperties) : undefined}
-                        onClick={() => router.push(hrefFor(row))}
+                        onClick={() => row.id && openPanel({ kind: isCompany ? "company" : "person", id: row.id })}
                       >
                         <TableCell>
-                          <Link
-                            href={hrefFor(row)}
-                            className="flex items-center gap-3"
-                            onClick={(e) => e.stopPropagation()}
+                          <button
+                            type="button"
+                            className="flex items-center gap-3 rounded-md text-left focus-visible:ring-2 focus-visible:ring-marca focus-visible:outline-none"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (row.id) openPanel({ kind: isCompany ? "company" : "person", id: row.id });
+                            }}
                           >
                             <ContactAvatar
                               seed={row.wa_id ?? row.id ?? ""}
@@ -325,11 +356,11 @@ export function ContactsView() {
                               <p className="max-w-56 truncate font-medium">{row.display_name}</p>
                               <p className="text-xs text-muted-foreground tabular-nums">
                                 {isCompany
-                                  ? row.phone || row.email || "Empresa"
+                                  ? (row.phone ? formatPhone(row.phone) : row.email || "Empresa")
                                   : formatPhone(row.wa_id ?? row.phone)}
                               </p>
                             </div>
-                          </Link>
+                          </button>
                         </TableCell>
                         <TableCell className="hidden text-muted-foreground xl:table-cell">
                           {isCompany ? "Empresa" : "Persona"}
@@ -354,6 +385,12 @@ export function ContactsView() {
                         <TableCell>
                           <ClassificationBadge classification={row.classification} inactive={row.is_inactive === true} size="xs" />
                         </TableCell>
+                        <TableCell className="hidden sm:table-cell">
+                          <p className="tabular-nums">{row.purchase_count ? row.purchase_count : "—"}</p>
+                          {row.classification === "customer" && row.last_purchase_at && (
+                            <p className="text-xs text-texto-suave">Última: {formatDate(row.last_purchase_at)}</p>
+                          )}
+                        </TableCell>
                         <TableCell className="hidden md:table-cell">
                           <div className="flex max-w-xs flex-wrap gap-1">
                             {rowTags.slice(0, 3).map((t) => (
@@ -375,30 +412,29 @@ export function ContactsView() {
                           {now === null ? " " : formatRelative(row.last_interaction, now)}
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          {row.conversation_id ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon-sm" asChild>
-                                  <Link href={`/?c=${row.conversation_id}`} aria-label="Abrir conversación">
-                                    <Icon name="bandeja" />
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon-sm" aria-label={`Acciones de ${row.display_name}`}>
+                                <Icon name="mas" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52">
+                              <DropdownMenuItem
+                                onSelect={() => row.id && openPanel({ kind: isCompany ? "company" : "person", id: row.id })}
+                              >
+                                <Icon name={isCompany ? "empresa" : "persona"} /> Abrir ficha
+                              </DropdownMenuItem>
+                              {row.conversation_id ? (
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/?c=${row.conversation_id}`}>
+                                    <Icon name="bandeja" /> Abrir chat
                                   </Link>
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Abrir conversación</TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            !isCompany && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="inline-flex size-8 items-center justify-center text-texto-suave/50" tabIndex={0}>
-                                    <Icon name="bandeja" className="size-4" />
-                                    <span className="sr-only">Sin conversación de WhatsApp</span>
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipContent>Sin conversación de WhatsApp</TooltipContent>
-                              </Tooltip>
-                            )
-                          )}
+                                </DropdownMenuItem>
+                              ) : (
+                                !isCompany && <DropdownMenuItem disabled>Sin conversación de WhatsApp</DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     );
@@ -422,7 +458,8 @@ export function ContactsView() {
         </footer>
       )}
 
-      <NewEntryDialog preset={preset} onClose={() => setPreset(null)} />
+      <NewEntryDialog preset={preset} onClose={() => setPreset(null)} onCreated={(kind, id) => openPanel({ kind, id })} />
+      <EntityPanel target={panel} onClose={() => openPanel(null)} />
     </div>
   );
 }
@@ -487,6 +524,7 @@ function SkeletonRow() {
       <TableCell className="hidden xl:table-cell"><Skeleton className="h-4 w-14" /></TableCell>
       <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
       <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+      <TableCell className="hidden sm:table-cell"><Skeleton className="h-4 w-8" /></TableCell>
       <TableCell className="hidden md:table-cell"><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
       <TableCell className="hidden xl:table-cell"><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
       <TableCell className="hidden sm:table-cell"><Skeleton className="h-4 w-20" /></TableCell>

@@ -1,13 +1,13 @@
 "use client";
 
+import { HistoryIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ClassificationBadge, CLASSIFICATION_STYLES } from "@/components/crm/classification-badge";
+import { CLASSIFICATION_STYLES } from "@/components/crm/classification-badge";
 import { profileName, useCrm } from "@/components/crm/crm-provider";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fetchClassificationHistory, setClassification } from "@/lib/crm/classification";
 import { errorMessage } from "@/lib/crm/contacts";
 import {
@@ -30,44 +30,28 @@ type Props = {
   source: string;
   classifiedAt: string | null;
   inactive?: boolean;
-  /** Se llama tras guardar para recargar la ficha (la base fija origen y fecha). */
+  /** Tras guardar (la base fija origen y fecha). */
   onChanged: () => void | Promise<void>;
 };
 
 /**
- * Clasificación de una persona o empresa: insignia, origen del último cambio,
- * cambio manual con motivo opcional e historial (solo lectura).
+ * Clasificación en UNA línea: selector compacto (cambiar = un clic y elegir),
+ * origen y fecha en texto pequeño, e historial detrás de un icono. El cambio
+ * queda en el historial con el usuario (`set_classification`).
  */
 export function ClassificationControl({ entity, id, classification, source, classifiedAt, inactive, onChanged }: Props) {
   const supabase = createClient();
   const { profiles } = useCrm();
   const current: Classification = isClassification(classification) ? classification : "unclassified";
-  const [open, setOpen] = useState(false);
-  const [choice, setChoice] = useState<Classification>(current);
-  const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<ClassificationHistoryEntry[] | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
 
-  function openDialog() {
-    setChoice(current);
-    setReason("");
-    setOpen(true);
-  }
-
-  async function save() {
-    if (choice === current) {
-      setOpen(false);
-      return;
-    }
+  async function change(value: string) {
+    if (!isClassification(value) || value === current) return;
     setSaving(true);
     try {
-      await setClassification(supabase, entity, id, choice, reason);
-      toast.success(`Clasificado como ${CLASSIFICATION_LABELS[choice]}`);
-      setOpen(false);
-      setHistory(null);
-      setShowHistory(false);
+      await setClassification(supabase, entity, id, value, "");
+      toast.success(`Clasificado como ${CLASSIFICATION_LABELS[value]}`);
       await onChanged();
     } catch (error) {
       toast.error(errorMessage(error, "No se pudo cambiar la clasificación"));
@@ -76,114 +60,80 @@ export function ClassificationControl({ entity, id, classification, source, clas
     }
   }
 
-  function toggleHistory() {
-    if (showHistory) {
-      setShowHistory(false);
-      return;
-    }
-    setShowHistory(true);
-    if (history) return;
-    setLoadingHistory(true);
+  function loadHistory(open: boolean) {
+    if (!open) return;
     fetchClassificationHistory(supabase, entity, id)
       .then(setHistory)
-      .catch((error) => toast.error(errorMessage(error, "No se pudo cargar el historial")))
-      .finally(() => setLoadingHistory(false));
+      .catch((error) => toast.error(errorMessage(error, "No se pudo cargar el historial")));
   }
 
-  const who = (userId: string | null) =>
-    userId ? profileName(profiles.find((p) => p.id === userId)) : "Sistema";
+  const who = (userId: string | null) => (userId ? profileName(profiles.find((p) => p.id === userId)) : "Sistema");
+  const origin = `${CLASSIFICATION_SOURCE_LABELS[source] ?? source}${classifiedAt ? ` · ${formatDate(classifiedAt)}` : ""}`;
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <ClassificationBadge classification={current} inactive={inactive} />
-        <span className="text-xs text-texto-suave">
-          {CLASSIFICATION_SOURCE_LABELS[source] ?? source}
-          {classifiedAt && ` · ${formatDate(classifiedAt)}`}
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={openDialog}>
-          Cambiar clasificación
-        </Button>
-        <Button variant="ghost" size="sm" onClick={toggleHistory} aria-expanded={showHistory}>
-          {showHistory ? "Ocultar historial" : "Ver historial"}
-        </Button>
-      </div>
-
-      {showHistory && (
-        <ol className="space-y-2 rounded-xl bg-superficie-2 p-3 text-sm" aria-label="Historial de clasificación">
-          {loadingHistory && <li className="text-texto-suave">Cargando…</li>}
-          {history?.length === 0 && <li className="text-texto-suave">Sin cambios registrados.</li>}
-          {history?.map((entry) => (
-            <li key={entry.id} className="space-y-0.5">
-              <p>
-                <span className="font-medium">
-                  {entry.from_classification && isClassification(entry.from_classification)
-                    ? `${CLASSIFICATION_LABELS[entry.from_classification]} → `
-                    : ""}
-                  {isClassification(entry.to_classification)
-                    ? CLASSIFICATION_LABELS[entry.to_classification]
-                    : entry.to_classification}
-                </span>{" "}
-                <span className="text-texto-suave">
-                  ({CLASSIFICATION_SOURCE_LABELS[entry.source] ?? entry.source})
-                </span>
-              </p>
-              <p className="text-xs text-texto-suave">
-                {formatDateTime(entry.changed_at)} · {who(entry.changed_by)}
-              </p>
-              {entry.reason && <p className="text-xs">{entry.reason}</p>}
-            </li>
+    <div className="flex flex-wrap items-center gap-2">
+      <Select value={current} onValueChange={(v) => void change(v)} disabled={saving}>
+        <SelectTrigger
+          size="sm"
+          className={cn("h-8 w-auto gap-1.5 rounded-full border-transparent px-3 text-xs font-medium", CLASSIFICATION_STYLES[current])}
+          aria-label="Clasificación"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent position="popper" align="start">
+          {CLASSIFICATIONS.map((c) => (
+            <SelectItem key={c} value={c}>
+              {CLASSIFICATION_LABELS[c]}
+            </SelectItem>
           ))}
-        </ol>
+        </SelectContent>
+      </Select>
+      {inactive && (
+        <span className="inline-flex h-6 items-center rounded-full bg-error-suave px-2.5 text-xs font-medium text-error-texto">
+          Inactivo
+        </span>
       )}
+      <span className="min-w-0 truncate text-xs text-texto-suave">{origin}</span>
 
-      <Dialog open={open} onOpenChange={(v) => !saving && setOpen(v)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Cambiar clasificación</DialogTitle>
-            <DialogDescription>
-              El cambio queda en el historial con tu nombre. «Cliente» también se asigna solo al confirmar un pedido.
-            </DialogDescription>
-          </DialogHeader>
-          <div role="radiogroup" aria-label="Clasificación" className="grid grid-cols-2 gap-2">
-            {CLASSIFICATIONS.map((c) => (
+      <Popover onOpenChange={loadHistory}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
               <button
-                key={c}
                 type="button"
-                role="radio"
-                aria-checked={choice === c}
-                onClick={() => setChoice(c)}
-                className={cn(
-                  "flex h-11 items-center justify-center rounded-lg border text-sm font-medium transition-colors",
-                  choice === c ? cn("border-transparent ring-2 ring-marca", CLASSIFICATION_STYLES[c]) : "hover:bg-superficie-2",
-                )}
+                className="ml-auto rounded-md p-1 text-texto-suave hover:bg-superficie-2 hover:text-texto"
+                aria-label="Historial de clasificación"
               >
-                {CLASSIFICATION_LABELS[c]}
+                <HistoryIcon className="size-4" aria-hidden />
               </button>
-            ))}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={`motivo-${id}`}>Motivo (opcional)</Label>
-            <Textarea
-              id={`motivo-${id}`}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              maxLength={300}
-              placeholder="Ej.: pidió cotización por teléfono"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>
-              Cancelar
-            </Button>
-            <Button onClick={() => void save()} disabled={saving || choice === current}>
-              {saving ? "Guardando…" : "Guardar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Historial de clasificación</TooltipContent>
+        </Tooltip>
+        <PopoverContent align="end" className="max-h-80 w-72 overflow-y-auto">
+          {history === null && <p className="text-sm text-texto-suave">Cargando…</p>}
+          {history?.length === 0 && <p className="text-sm text-texto-suave">Sin cambios registrados.</p>}
+          {history && history.length > 0 && (
+            <ol className="space-y-2 text-sm">
+              {history.map((entry) => (
+                <li key={entry.id}>
+                  <p className="font-medium">
+                    {entry.from_classification && isClassification(entry.from_classification)
+                      ? `${CLASSIFICATION_LABELS[entry.from_classification]} → `
+                      : ""}
+                    {isClassification(entry.to_classification) ? CLASSIFICATION_LABELS[entry.to_classification] : entry.to_classification}
+                  </p>
+                  <p className="text-xs text-texto-suave">
+                    {CLASSIFICATION_SOURCE_LABELS[entry.source] ?? entry.source} · {formatDateTime(entry.changed_at)} ·{" "}
+                    {who(entry.changed_by)}
+                  </p>
+                  {entry.reason && <p className="text-xs">{entry.reason}</p>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }

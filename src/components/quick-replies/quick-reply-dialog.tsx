@@ -12,9 +12,28 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { applyTemplate, TEMPLATE_VARIABLES } from "@/lib/crm/templates";
+import {
+  isQuickReplyPermission,
+  QUICK_REPLY_PERMISSION_LABELS,
+  type QuickReplyPermission,
+} from "@/lib/agents/config";
 import type { QuickReply } from "@/lib/crm/types";
+
+export type QuickReplyValues = {
+  shortcut: string;
+  body: string;
+  when_to_use: string | null;
+  agent_permission: QuickReplyPermission;
+};
+
+const PERMISSION_HINTS: Record<QuickReplyPermission, string> = {
+  automatic: "El asistente puede enviarla solo.",
+  approval: "El asistente la propone y una persona la aprueba.",
+  human_only: "El asistente nunca la usa.",
+};
 
 /** Contacto de ejemplo para la vista previa. */
 const SAMPLE_CONTACT = { name: "Ana López", wa_id: "5215512345678", phone: "5215512345678", company: "Acme" };
@@ -25,13 +44,17 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   reply: QuickReply | null;
-  onSubmit: (values: { shortcut: string; body: string }) => Promise<boolean>;
+  onSubmit: (values: QuickReplyValues) => Promise<boolean>;
 };
 
 export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit }: Props) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const [shortcut, setShortcut] = useState(reply?.shortcut ?? "");
   const [body, setBody] = useState(reply?.body ?? "");
+  const [whenToUse, setWhenToUse] = useState(reply?.when_to_use ?? "");
+  const [permission, setPermission] = useState<QuickReplyPermission>(
+    isQuickReplyPermission(reply?.agent_permission) ? reply.agent_permission : "human_only",
+  );
   const [saving, setSaving] = useState(false);
   const shortcutValid = SHORTCUT_RE.test(shortcut);
 
@@ -51,7 +74,12 @@ export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit }: Props)
     event.preventDefault();
     if (!shortcutValid || !body.trim()) return;
     setSaving(true);
-    const ok = await onSubmit({ shortcut, body: body.trim() });
+    const ok = await onSubmit({
+      shortcut,
+      body: body.trim(),
+      when_to_use: whenToUse.trim() || null,
+      agent_permission: permission,
+    });
     setSaving(false);
     if (ok) onOpenChange(false);
   }
@@ -124,6 +152,36 @@ export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit }: Props)
               </p>
             </div>
           )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="qr-when">Cuándo usarla</Label>
+              <Textarea
+                id="qr-when"
+                value={whenToUse}
+                onChange={(e) => setWhenToUse(e.target.value)}
+                rows={2}
+                maxLength={300}
+                placeholder="Cuando pregunten por el horario"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="qr-permission">Permiso del agente</Label>
+              <Select value={permission} onValueChange={(v) => isQuickReplyPermission(v) && setPermission(v)}>
+                <SelectTrigger id="qr-permission" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  {(Object.keys(QUICK_REPLY_PERMISSION_LABELS) as QuickReplyPermission[]).map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {QUICK_REPLY_PERMISSION_LABELS[p]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{PERMISSION_HINTS[permission]}</p>
+            </div>
+          </div>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

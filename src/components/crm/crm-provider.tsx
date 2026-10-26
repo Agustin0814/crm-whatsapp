@@ -4,13 +4,15 @@ import { useRouter } from "next/navigation";
 import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { ContactRole } from "@/lib/crm/companies";
-import type { Profile, Tag } from "@/lib/crm/types";
+import { isAdminRole, type Profile, type Tag } from "@/lib/crm/types";
 import { createClient } from "@/lib/supabase/client";
 
 type CrmContextValue = {
   /** Perfil del usuario con sesión (null mientras carga). */
   me: Profile | null;
   isAdmin: boolean;
+  /** Proveedor: el único que ve y edita la capa bloqueada de los agentes. */
+  isSuperadmin: boolean;
   loading: boolean;
   /** Todos los usuarios (para asignar conversaciones). */
   profiles: Profile[];
@@ -82,7 +84,8 @@ export function CrmProvider({ children }: { children: ReactNode }) {
     const me = profiles.find((p) => p.id === userId) ?? null;
     return {
       me,
-      isAdmin: me?.role === "admin",
+      isAdmin: isAdminRole(me?.role),
+      isSuperadmin: me?.role === "superadmin",
       loading,
       profiles,
       tags,

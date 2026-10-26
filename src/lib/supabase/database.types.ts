@@ -16,6 +16,377 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_alerts: {
+        Row: {
+          agent_id: string
+          audience: string
+          conversation_id: string | null
+          created_at: string
+          id: string
+          kind: string
+          message: string
+          read_at: string | null
+        }
+        Insert: {
+          agent_id: string
+          audience?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          message: string
+          read_at?: string | null
+        }
+        Update: {
+          agent_id?: string
+          audience?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          message?: string
+          read_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_alerts_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_alerts_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_locked_config: {
+        Row: {
+          agent_id: string
+          allowed_tools: string[]
+          daily_cap_ceiling: number
+          input_price_per_mtok: number
+          kill_switch: boolean
+          max_consecutive_ceiling: number
+          max_output_tokens: number
+          model: string
+          monthly_token_cap: number
+          output_price_per_mtok: number
+          reasoning_effort: string
+          safety_rules: string
+          system_prompt: string
+          temperature: number | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          agent_id: string
+          allowed_tools?: string[]
+          daily_cap_ceiling?: number
+          input_price_per_mtok?: number
+          kill_switch?: boolean
+          max_consecutive_ceiling?: number
+          max_output_tokens?: number
+          model?: string
+          monthly_token_cap?: number
+          output_price_per_mtok?: number
+          reasoning_effort?: string
+          safety_rules?: string
+          system_prompt?: string
+          temperature?: number | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          agent_id?: string
+          allowed_tools?: string[]
+          daily_cap_ceiling?: number
+          input_price_per_mtok?: number
+          kill_switch?: boolean
+          max_consecutive_ceiling?: number
+          max_output_tokens?: number
+          model?: string
+          monthly_token_cap?: number
+          output_price_per_mtok?: number
+          reasoning_effort?: string
+          safety_rules?: string
+          system_prompt?: string
+          temperature?: number | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_locked_config_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: true
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_locked_config_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_scheduled_runs: {
+        Row: {
+          agent_id: string
+          attempts: number
+          conversation_id: string
+          created_at: string
+          id: string
+          reason: string | null
+          run_at: string
+          status: string
+          trigger_message_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          attempts?: number
+          conversation_id: string
+          created_at?: string
+          id?: string
+          reason?: string | null
+          run_at: string
+          status?: string
+          trigger_message_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          attempts?: number
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          reason?: string | null
+          run_at?: string
+          status?: string
+          trigger_message_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_scheduled_runs_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_scheduled_runs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_scheduled_runs_trigger_message_id_fkey"
+            columns: ["trigger_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_suggestions: {
+        Row: {
+          agent_id: string
+          body: string
+          conversation_id: string
+          created_at: string
+          id: string
+          quick_reply_id: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          status: string
+          trigger_message_id: string | null
+        }
+        Insert: {
+          agent_id: string
+          body: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          quick_reply_id?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+          trigger_message_id?: string | null
+        }
+        Update: {
+          agent_id?: string
+          body?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          quick_reply_id?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+          trigger_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_suggestions_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_suggestions_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_suggestions_quick_reply_id_fkey"
+            columns: ["quick_reply_id"]
+            isOneToOne: false
+            referencedRelation: "quick_replies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_suggestions_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_suggestions_trigger_message_id_fkey"
+            columns: ["trigger_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_usage_log: {
+        Row: {
+          agent_id: string
+          conversation_id: string | null
+          created_at: string
+          est_cost_usd: number
+          id: string
+          input_tokens: number
+          message_id: string | null
+          model: string | null
+          outcome: string
+          output_tokens: number
+          reason: string | null
+          run_id: string | null
+        }
+        Insert: {
+          agent_id: string
+          conversation_id?: string | null
+          created_at?: string
+          est_cost_usd?: number
+          id?: string
+          input_tokens?: number
+          message_id?: string | null
+          model?: string | null
+          outcome: string
+          output_tokens?: number
+          reason?: string | null
+          run_id?: string | null
+        }
+        Update: {
+          agent_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          est_cost_usd?: number
+          id?: string
+          input_tokens?: number
+          message_id?: string | null
+          model?: string | null
+          outcome?: string
+          output_tokens?: number
+          reason?: string | null
+          run_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_usage_log_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_usage_log_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_usage_log_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_usage_log_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "agent_scheduled_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agents: {
+        Row: {
+          config: Json
+          enabled: boolean
+          id: string
+          key: string
+          mode: string
+          name: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          config?: Json
+          enabled?: boolean
+          id?: string
+          key: string
+          mode?: string
+          name: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          config?: Json
+          enabled?: boolean
+          id?: string
+          key?: string
+          mode?: string
+          name?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agents_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_settings: {
         Row: {
           key: string
@@ -182,6 +553,8 @@ export type Database = {
           notes: string | null
           payment_terms: string
           phone: string | null
+          phone_canonical: string | null
+          purchase_count: number
           rfc: string | null
           trade_name: string
           updated_at: string
@@ -206,6 +579,8 @@ export type Database = {
           notes?: string | null
           payment_terms?: string
           phone?: string | null
+          phone_canonical?: string | null
+          purchase_count?: number
           rfc?: string | null
           trade_name: string
           updated_at?: string
@@ -230,6 +605,8 @@ export type Database = {
           notes?: string | null
           payment_terms?: string
           phone?: string | null
+          phone_canonical?: string | null
+          purchase_count?: number
           rfc?: string | null
           trade_name?: string
           updated_at?: string
@@ -350,6 +727,7 @@ export type Database = {
           notes: string | null
           phone: string | null
           phone_canonical: string | null
+          purchase_count: number
           updated_at: string
           wa_id: string | null
         }
@@ -367,6 +745,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           phone_canonical?: string | null
+          purchase_count?: number
           updated_at?: string
           wa_id?: string | null
         }
@@ -384,6 +763,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           phone_canonical?: string | null
+          purchase_count?: number
           updated_at?: string
           wa_id?: string | null
         }
@@ -391,9 +771,13 @@ export type Database = {
       }
       conversations: {
         Row: {
+          agent_consecutive_count: number
+          agent_paused: boolean
+          agent_paused_reason: string | null
           assigned_to: string | null
           contact_id: string
           created_at: string
+          human_seen_at: string | null
           id: string
           is_pinned: boolean
           last_inbound_at: string | null
@@ -404,9 +788,13 @@ export type Database = {
           unread_count: number
         }
         Insert: {
+          agent_consecutive_count?: number
+          agent_paused?: boolean
+          agent_paused_reason?: string | null
           assigned_to?: string | null
           contact_id: string
           created_at?: string
+          human_seen_at?: string | null
           id?: string
           is_pinned?: boolean
           last_inbound_at?: string | null
@@ -417,9 +805,13 @@ export type Database = {
           unread_count?: number
         }
         Update: {
+          agent_consecutive_count?: number
+          agent_paused?: boolean
+          agent_paused_reason?: string | null
           assigned_to?: string | null
           contact_id?: string
           created_at?: string
+          human_seen_at?: string | null
           id?: string
           is_pinned?: boolean
           last_inbound_at?: string | null
@@ -441,6 +833,71 @@ export type Database = {
             foreignKeyName: "conversations_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: true
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      entity_notes: {
+        Row: {
+          body: string | null
+          company_id: string | null
+          contact_id: string | null
+          created_at: string
+          created_by: string | null
+          event_on: string
+          id: string
+          kind: string
+          requested_by: string | null
+        }
+        Insert: {
+          body?: string | null
+          company_id?: string | null
+          contact_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          event_on?: string
+          id?: string
+          kind: string
+          requested_by?: string | null
+        }
+        Update: {
+          body?: string | null
+          company_id?: string | null
+          contact_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          event_on?: string
+          id?: string
+          kind?: string
+          requested_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_notes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_notes_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_notes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_notes_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
             referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
@@ -558,6 +1015,7 @@ export type Database = {
       }
       messages: {
         Row: {
+          agent_id: string | null
           body: string | null
           conversation_id: string
           created_at: string
@@ -572,12 +1030,14 @@ export type Database = {
           media_size: number | null
           media_status: string | null
           sender_id: string | null
+          sent_by_agent: boolean
           status: string
           type: string
           wa_message_id: string | null
           wa_timestamp: string | null
         }
         Insert: {
+          agent_id?: string | null
           body?: string | null
           conversation_id: string
           created_at?: string
@@ -592,12 +1052,14 @@ export type Database = {
           media_size?: number | null
           media_status?: string | null
           sender_id?: string | null
+          sent_by_agent?: boolean
           status?: string
           type?: string
           wa_message_id?: string | null
           wa_timestamp?: string | null
         }
         Update: {
+          agent_id?: string | null
           body?: string | null
           conversation_id?: string
           created_at?: string
@@ -612,12 +1074,20 @@ export type Database = {
           media_size?: number | null
           media_status?: string | null
           sender_id?: string | null
+          sent_by_agent?: boolean
           status?: string
           type?: string
           wa_message_id?: string | null
           wa_timestamp?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "messages_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "messages_conversation_id_fkey"
             columns: ["conversation_id"]
@@ -952,6 +1422,49 @@ export type Database = {
           },
         ]
       }
+      phone_match_dismissals: {
+        Row: {
+          company_id: string
+          contact_id: string
+          dismissed_at: string
+          dismissed_by: string | null
+        }
+        Insert: {
+          company_id: string
+          contact_id: string
+          dismissed_at?: string
+          dismissed_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          contact_id?: string
+          dismissed_at?: string
+          dismissed_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "phone_match_dismissals_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "phone_match_dismissals_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "phone_match_dismissals_dismissed_by_fkey"
+            columns: ["dismissed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -975,25 +1488,31 @@ export type Database = {
       }
       quick_replies: {
         Row: {
+          agent_permission: string
           body: string
           created_at: string
           created_by: string | null
           id: string
           shortcut: string
+          when_to_use: string | null
         }
         Insert: {
+          agent_permission?: string
           body: string
           created_at?: string
           created_by?: string | null
           id?: string
           shortcut: string
+          when_to_use?: string | null
         }
         Update: {
+          agent_permission?: string
           body?: string
           created_at?: string
           created_by?: string | null
           id?: string
           shortcut?: string
+          when_to_use?: string | null
         }
         Relationships: [
           {
@@ -1038,6 +1557,25 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_usage_monthly: {
+        Row: {
+          agent_id: string | null
+          est_cost_usd: number | null
+          input_tokens: number | null
+          month: string | null
+          output_tokens: number | null
+          replies: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_usage_log_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_directory: {
         Row: {
           classification: string | null
@@ -1049,8 +1587,10 @@ export type Database = {
           is_inactive: boolean | null
           kind: string | null
           last_interaction: string | null
+          last_purchase_at: string | null
           name: string | null
           phone: string | null
+          purchase_count: number | null
           related_count: number | null
           related_names: string[] | null
           role_ids: string[] | null
@@ -1061,6 +1601,58 @@ export type Database = {
       }
     }
     Functions: {
+      add_entity_note: {
+        Args: {
+          p_body: string
+          p_date?: string
+          p_entity: string
+          p_id: string
+        }
+        Returns: {
+          body: string | null
+          company_id: string | null
+          contact_id: string | null
+          created_at: string
+          created_by: string | null
+          event_on: string
+          id: string
+          kind: string
+          requested_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "entity_notes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      add_internal_note: {
+        Args: { p_body: string; p_conversation_id: string }
+        Returns: {
+          author_id: string | null
+          body: string
+          conversation_id: string
+          created_at: string
+          id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "notes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      adjust_purchase_count: {
+        Args: {
+          p_count: number
+          p_entity: string
+          p_id: string
+          p_reason?: string
+        }
+        Returns: undefined
+      }
+      agent_limits: { Args: { p_key: string }; Returns: Json }
+      agent_usage_summary: { Args: { p_key: string }; Returns: Json }
       approve_order: {
         Args: { p_note: string; p_order_id: string }
         Returns: {
@@ -1089,6 +1681,55 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      claim_agent_runs: {
+        Args: { p_limit?: number }
+        Returns: {
+          agent_id: string
+          attempts: number
+          conversation_id: string
+          created_at: string
+          id: string
+          reason: string | null
+          run_at: string
+          status: string
+          trigger_message_id: string | null
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "agent_scheduled_runs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      company_phone_matches: {
+        Args: { p_contact_id: string }
+        Returns: {
+          classification: string
+          company_id: string
+          trade_name: string
+        }[]
+      }
+      contacts_summary: {
+        Args: never
+        Returns: {
+          companies: number
+          contacts: number
+          customers: number
+          inactive_customers: number
+        }[]
+      }
+      create_company: {
+        Args: {
+          p_acknowledged?: string[]
+          p_email?: string
+          p_link_contact_id?: string
+          p_phone?: string
+          p_role_ids?: string[]
+          p_trade_name: string
+        }
+        Returns: Json
       }
       create_order: {
         Args: {
@@ -1126,10 +1767,80 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_person: {
+        Args: {
+          p_acknowledged?: string[]
+          p_email?: string
+          p_link_company_id?: string
+          p_name: string
+          p_phone?: string
+          p_role_ids?: string[]
+        }
+        Returns: Json
+      }
+      delete_entity_note: { Args: { p_note_id: string }; Returns: undefined }
+      find_phone_matches: {
+        Args: {
+          p_exclude_id?: string
+          p_exclude_kind?: string
+          p_phone: string
+        }
+        Returns: {
+          classification: string
+          has_conversation: boolean
+          id: string
+          is_linked: boolean
+          kind: string
+          name: string
+        }[]
+      }
+      link_contact_to_company: {
+        Args: {
+          p_company_id: string
+          p_contact_id: string
+          p_role_ids?: string[]
+        }
+        Returns: string
+      }
       normalize_phone: { Args: { p: string }; Returns: string }
+      register_purchase: {
+        Args: {
+          p_date?: string
+          p_entity: string
+          p_id: string
+          p_note?: string
+          p_requested_by?: string
+        }
+        Returns: {
+          body: string | null
+          company_id: string | null
+          contact_id: string | null
+          created_at: string
+          created_by: string | null
+          event_on: string
+          id: string
+          kind: string
+          requested_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "entity_notes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       resolve_suggestion: {
         Args: { p_accept: boolean; p_id: string }
         Returns: undefined
+      }
+      schedule_agent_run: {
+        Args: {
+          p_agent_id: string
+          p_conversation_id: string
+          p_message_id: string
+          p_run_at: string
+        }
+        Returns: string
       }
       search_conversations: {
         Args: {
@@ -1146,9 +1857,13 @@ export type Database = {
           p_unread_only?: boolean
         }
         Returns: {
+          agent_consecutive_count: number
+          agent_paused: boolean
+          agent_paused_reason: string | null
           assigned_to: string | null
           contact_id: string
           created_at: string
+          human_seen_at: string | null
           id: string
           is_pinned: boolean
           last_inbound_at: string | null
@@ -1186,8 +1901,10 @@ export type Database = {
           is_inactive: boolean | null
           kind: string | null
           last_interaction: string | null
+          last_purchase_at: string | null
           name: string | null
           phone: string | null
+          purchase_count: number | null
           related_count: number | null
           related_names: string[] | null
           role_ids: string[] | null
@@ -1201,6 +1918,32 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      set_agent_paused: {
+        Args: { p_conversation_id: string; p_paused: boolean }
+        Returns: {
+          agent_consecutive_count: number
+          agent_paused: boolean
+          agent_paused_reason: string | null
+          assigned_to: string | null
+          contact_id: string
+          created_at: string
+          human_seen_at: string | null
+          id: string
+          is_pinned: boolean
+          last_inbound_at: string | null
+          last_message_at: string | null
+          last_message_preview: string | null
+          last_message_type: string | null
+          status: string
+          unread_count: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "conversations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       set_classification: {
         Args: {
           p_classification: string
@@ -1209,6 +1952,51 @@ export type Database = {
           p_reason?: string
         }
         Returns: undefined
+      }
+      update_agent_settings: {
+        Args: {
+          p_config: Json
+          p_enabled: boolean
+          p_key: string
+          p_mode: string
+        }
+        Returns: {
+          config: Json
+          enabled: boolean
+          id: string
+          key: string
+          mode: string
+          name: string
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "agents"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_phone: {
+        Args: {
+          p_acknowledged?: string[]
+          p_id: string
+          p_kind: string
+          p_link_id?: string
+          p_phone: string
+          p_role_ids?: string[]
+        }
+        Returns: Json
+      }
+      update_purchase_count: {
+        Args: {
+          p_action: string
+          p_entity: string
+          p_id: string
+          p_undo?: Json
+          p_value?: number
+        }
+        Returns: Json
       }
       upsert_whatsapp_contact: {
         Args: { p_name: string; p_wa_id: string }
@@ -1224,12 +2012,125 @@ export type Database = {
   }
 }
 
-type PublicSchema = Database["public"]
-type TablesAndViews = PublicSchema["Tables"] & PublicSchema["Views"]
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
 
-// Atajos para leer filas de las tablas (y vistas) públicas.
-export type Tables<T extends keyof TablesAndViews> = TablesAndViews[T]["Row"]
-export type TablesInsert<T extends keyof PublicSchema["Tables"]> =
-  PublicSchema["Tables"][T]["Insert"]
-export type TablesUpdate<T extends keyof PublicSchema["Tables"]> =
-  PublicSchema["Tables"][T]["Update"]
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
+export type Tables<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never) = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
+
+export type TablesInsert<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never) = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Insert: infer I
+    }
+    ? I
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
+    : never
+
+export type TablesUpdate<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never) = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+      Update: infer U
+    }
+    ? U
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
+    : never
+
+export type Enums<
+  DefaultSchemaEnumNameOrOptions extends
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    : never) = never,
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+    : never
+
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never) = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
+
+export const Constants = {
+  public: {
+    Enums: {},
+  },
+} as const

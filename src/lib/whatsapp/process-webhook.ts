@@ -1,4 +1,5 @@
 import "server-only";
+import { processDueRuns, scheduleAgentsForInbound } from "@/lib/agents/engine";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TablesInsert } from "@/lib/supabase/database.types";
 import { baseMime, isMediaKind, sanitizeFilename } from "@/lib/media/rules";
@@ -105,6 +106,16 @@ async function handleInboundMessage(
   // ya recibió su 200. storeInboundMedia nunca lanza ni reintenta en bucle.
   const created = inserted?.[0];
   if (created && media) await storeInboundMedia(supabase, created);
+
+  // Asistente de IA: programa su respuesta (o la pospone si ya había una).
+  // Con retraso 0 se procesa aquí mismo; si no, la toma el cron cada minuto.
+  if (created) {
+    const immediate = await scheduleAgentsForInbound(supabase, {
+      conversationId: created.conversation_id,
+      messageId: created.id,
+    });
+    if (immediate) await processDueRuns(supabase).catch((error) => logError("asistente", message.id, error));
+  }
 }
 
 /**

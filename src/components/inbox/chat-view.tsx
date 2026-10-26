@@ -3,7 +3,6 @@
 import { ArrowLeftIcon, PanelRightCloseIcon, PanelRightOpenIcon, PinIcon } from "lucide-react";
 import { useRef, useState, type DragEvent } from "react";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
-import { OrderDialog } from "@/components/orders/order-dialog";
 import { profileName, useCrm } from "@/components/crm/crm-provider";
 import { StatusDot } from "@/components/crm/status-badge";
 import { TagChip } from "@/components/crm/tag-chip";
@@ -24,7 +23,10 @@ import { Composer, type ComposerHandle } from "./composer";
 import { ConversationActionsMenu, UNASSIGNED, type ConversationActionsHandlers } from "./conversation-actions";
 import { MessageList } from "./message-list";
 import { NotesPanel } from "./notes-panel";
+import { CompanyMatchBanner } from "./company-match-banner";
 import { SuggestionBanner } from "./suggestion-banner";
+import { AgentPauseToggle } from "./agent-pause-toggle";
+import { AgentSuggestionBanner } from "./agent-suggestion-banner";
 
 type Props = ConversationActionsHandlers & {
   conversation: ConversationItem;
@@ -58,7 +60,6 @@ export function ChatView({
 }: Props) {
   const { profiles } = useCrm();
   const [showNotes, setShowNotes] = useState(false);
-  const [orderOpen, setOrderOpen] = useState(false);
   const composerRef = useRef<ComposerHandle>(null);
   // Contador de dragenter/dragleave: los hijos disparan eventos propios.
   const dragDepth = useRef(0);
@@ -166,6 +167,8 @@ export function ChatView({
             </SelectContent>
           </Select>
 
+          <AgentPauseToggle conversation={conversation} />
+
           <IconButton
             label={showNotes ? "Volver a los mensajes" : "Notas internas"}
             onClick={() => setShowNotes((v) => !v)}
@@ -175,12 +178,7 @@ export function ChatView({
             <Icon name="notas" className="size-5" />
           </IconButton>
 
-          <ConversationActionsMenu
-            conversation={conversation}
-            {...handlers}
-            triggerClassName="text-texto-suave"
-            onNewOrder={contact ? () => setOrderOpen(true) : undefined}
-          />
+          <ConversationActionsMenu conversation={conversation} {...handlers} triggerClassName="text-texto-suave" />
 
           <IconButton
             label={detailsOpen ? "Cerrar ficha del contacto" : "Abrir ficha del contacto"}
@@ -205,6 +203,9 @@ export function ChatView({
           onResolved={onReloadContact}
         />
       )}
+      {contact && (
+        <CompanyMatchBanner contactId={contact.id} phoneKey={`${contact.wa_id ?? ""}|${contact.phone ?? ""}`} />
+      )}
 
       {/* Se mantienen montados ambos para conservar el borrador y el scroll */}
       <div
@@ -222,6 +223,7 @@ export function ChatView({
           </div>
         )}
         <MessageList messages={messages} contact={contact} loading={loadingMessages} now={now} />
+        <AgentSuggestionBanner conversationId={conversation.id} windowOpen={windowOpen} />
         <Composer
           ref={composerRef}
           conversationId={conversation.id}
@@ -236,14 +238,6 @@ export function ChatView({
         <NotesPanel conversationId={conversation.id} />
       </div>
 
-      {contact && (
-        <OrderDialog
-          open={orderOpen}
-          onOpenChange={setOrderOpen}
-          source={{ kind: "contact", contactId: contact.id, contactName: title, conversationId: conversation.id }}
-          onCreated={onReloadContact}
-        />
-      )}
     </div>
   );
 }

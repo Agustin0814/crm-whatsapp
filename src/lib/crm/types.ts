@@ -8,12 +8,18 @@ export type Message = Tables<"messages">;
 export type Note = Tables<"notes">;
 export type QuickReply = Tables<"quick_replies">;
 
-export type Role = "admin" | "agent";
+export type Role = "superadmin" | "admin" | "agent";
 
 export const ROLE_LABELS: Record<Role, string> = {
+  superadmin: "Proveedor",
   admin: "Administrador",
   agent: "Agente",
 };
+
+/** admin y superadmin pueden todo lo que es «solo admin». */
+export function isAdminRole(role: string | null | undefined): boolean {
+  return role === "admin" || role === "superadmin";
+}
 
 /** Contacto con sus etiquetas ya aplanadas. */
 export type ContactWithTags = Contact & { tags: Tag[] };
@@ -61,7 +67,8 @@ export const CLASSIFICATION_SOURCE_LABELS: Record<string, string> = {
   default: "Por defecto",
   suggestion: "Sugerencia aceptada",
   manual: "Manual",
-  order: "Por pedido",
+  order: "Por pedido (anterior)",
+  purchase: "Por compra",
 };
 
 export type ClassificationEntity = "contact" | "company";

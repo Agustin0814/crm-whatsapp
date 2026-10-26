@@ -80,9 +80,10 @@ export function NotesPanel({ conversationId }: { conversationId: string }) {
     const body = draft.trim();
     if (!body || !me || saving) return;
     setSaving(true);
+    // Función central de la base (autor, fecha y hora los pone el servidor);
+    // la misma que usarán los futuros agentes.
     const { data, error } = await supabase
-      .from("notes")
-      .insert({ conversation_id: conversationId, body, author_id: me.id })
+      .rpc("add_internal_note", { p_conversation_id: conversationId, p_body: body })
       .select(NOTE_SELECT)
       .single();
     setSaving(false);

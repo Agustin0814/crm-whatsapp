@@ -24,8 +24,7 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 /**
  * Busca una empresa por nombre comercial o razón social. Si no existe, se
- * crea al vuelo solo con el nombre (contado, sin crédito: el crédito lo
- * autoriza un administrador en la ficha de la empresa).
+ * crea al vuelo solo con el nombre; el resto se completa en su ficha.
  */
 export function CompanyPicker({ excludeIds = [], onSelect, trigger, align = "start" }: Props) {
   const supabase = createClient();

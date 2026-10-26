@@ -1,14 +1,12 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { TagChip } from "@/components/crm/tag-chip";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { errorMessage, fetchContact, isUniqueViolation, setContactTag, updateContact } from "@/lib/crm/contacts";
+import { errorMessage, fetchContact, setContactTag, updateContact } from "@/lib/crm/contacts";
 import { parseCustomFields, type ContactWithTags, type CustomFields } from "@/lib/crm/types";
 import { formatDate, formatPhone } from "@/lib/format";
 import type { TablesUpdate } from "@/lib/supabase/database.types";
@@ -16,24 +14,28 @@ import { createClient } from "@/lib/supabase/client";
 import { ClassificationControl } from "./classification-control";
 import { CompanyLinks } from "./company-links";
 import { CustomFieldsEditor } from "./custom-fields-editor";
-import { notifyDuplicatePhone } from "./duplicate-phone";
 import { EditableField } from "./editable-field";
+import { PhoneField } from "./phone-field";
+import { PurchaseCounter } from "./purchase-counter";
 import { TagPicker } from "./tag-picker";
 
 type Props = {
   contact: ContactWithTags;
   onContactChange: (contact: ContactWithTags) => void;
-  /** Acciones extra bajo el encabezado (p. ej. «Abrir conversación»). */
+  /** Acciones extra bajo el encabezado (p. ej. «Abrir chat» en /contactos). */
   actions?: ReactNode;
-  /** Enlace a la ficha completa (pedidos, pagos…). Se oculta dentro de ella. */
-  showFullLink?: boolean;
+  /**
+   * false = la persona no tiene conversación de WhatsApp (creada a mano): las
+   * notas internas viven en el chat, así que solo tiene las notas generales.
+   */
+  hasConversation?: boolean;
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, children, id }: { title: string; children: ReactNode; id?: string }) {
   return (
-    <section className="space-y-3 border-t pt-5">
+    <section id={id} className="scroll-mt-4 space-y-3 border-t pt-5">
       <h3 className="text-xs font-bold tracking-wider text-texto uppercase">{title}</h3>
       {children}
     </section>
@@ -44,20 +46,15 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  * Ficha del contacto con edición en línea y guardado automático.
  * El nombre editado aquí no lo pisa el webhook (solo completa nombres vacíos).
  */
-export function ContactDetails({ contact, onContactChange, actions, showFullLink = true }: Props) {
+export function ContactDetails({ contact, onContactChange, actions, hasConversation = true }: Props) {
   const supabase = createClient();
-  const router = useRouter();
 
   async function save(patch: TablesUpdate<"contacts">) {
     try {
       const updated = await updateContact(supabase, contact.id, patch);
       onContactChange(updated);
     } catch (error) {
-      if (patch.phone && isUniqueViolation(error)) {
-        void notifyDuplicatePhone(supabase, patch.phone, (href) => router.push(href), contact.id);
-      } else {
-        toast.error(errorMessage(error, "No se pudo guardar el contacto"));
-      }
+      toast.error(errorMessage(error, "No se pudo guardar el contacto"));
       throw error;
     }
   }
@@ -100,16 +97,7 @@ export function ContactDetails({ contact, onContactChange, actions, showFullLink
           {contact.company && <p className="truncate text-sm text-texto-suave">{contact.company}</p>}
         </div>
       </div>
-      {(actions || showFullLink) && (
-        <div className="flex flex-wrap gap-2">
-          {actions}
-          {showFullLink && (
-            <Button asChild variant="outline" size="sm">
-              <Link href={`/contactos/persona/${contact.id}`}>Ficha completa y pedidos</Link>
-            </Button>
-          )}
-        </div>
-      )}
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
 
       <Section title="Clasificación">
         <ClassificationControl
@@ -140,16 +128,16 @@ export function ContactDetails({ contact, onContactChange, actions, showFullLink
         </div>
       </Section>
 
-      <Section title="Datos">
+      <Section title="Datos" id="datos-contacto">
         <div className="space-y-4">
           <EditableField icon="persona" label="Nombre" value={contact.name} onSave={(name) => save({ name })} />
-          <EditableField
-            icon="telefono"
-            label="Teléfono"
-            type="tel"
-            value={contact.phone}
-            format={formatPhone}
-            onSave={(phone) => save({ phone })}
+          {/* El teléfono se guarda con verificación de duplicados (update_phone) */}
+          <PhoneField owner={{ kind: "person", id: contact.id }} label="Teléfono" value={contact.phone} onSaved={reload} />
+          {/* Contador de compras: + / − / número (qué compró va en una nota interna del chat) */}
+          <PurchaseCounter
+            entity={{ kind: "contact", id: contact.id }}
+            state={contact}
+            onChange={(state) => onContactChange({ ...contact, ...state })}
           />
           <EditableField
             icon="correo"
@@ -180,6 +168,11 @@ export function ContactDetails({ contact, onContactChange, actions, showFullLink
           placeholder="Información útil sobre el contacto…"
           onSave={(notes) => save({ notes })}
         />
+        {!hasConversation && (
+          <p className="text-xs text-texto-suave">
+            Sin conversación de WhatsApp: las notas internas con fecha se escriben en el chat; aquí solo hay notas generales.
+          </p>
+        )}
       </Section>
 
       <Section title="Campos personalizados">

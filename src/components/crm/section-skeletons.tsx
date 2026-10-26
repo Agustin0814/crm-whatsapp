@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { PageHeader } from "@/components/crm/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AGENTS_DESCRIPTION } from "@/lib/agents/config";
 import { cn } from "@/lib/utils";
 
 /*
@@ -144,13 +145,23 @@ export function InboxSkeleton() {
 export function ContactsSkeleton() {
   return (
     <SkeletonScreen>
-      <PageHeader
-        title="Contactos"
-        description="Personas y empresas: prospectos, clientes y proveedores."
-        actions={<Skeleton className="h-9 w-24 rounded-lg" />}
-      />
+      {/* Tarjetas de resumen (mismas medidas que SummaryCards) */}
+      <div className="px-4 pt-4 md:px-6">
+        <div className="-mx-4 flex gap-3 overflow-hidden px-4 sm:mx-0 sm:grid sm:grid-cols-3 sm:px-0">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex min-w-52 shrink-0 items-center gap-3 rounded-xl border p-4 sm:min-w-0">
+              <Skeleton className="size-11 shrink-0 rounded-xl" />
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-20" />
+                <Skeleton className="h-7 w-12" />
+                <Skeleton className="h-3 w-16" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
       {/* Pestañas (Todos, Sin clasificar, Prospectos…) */}
-      <div className="border-b px-4 md:px-6">
+      <div className="mt-2 border-b px-4 md:px-6">
         <div className="flex h-11 items-center gap-6 overflow-hidden">
           {["w-12", "w-24", "w-20", "w-16", "w-20", "w-16"].map((w, i) => (
             <Skeleton key={i} className={cn("h-3.5 shrink-0", w)} />
@@ -162,6 +173,7 @@ export function ContactsSkeleton() {
         <Skeleton className="h-8 w-full rounded-lg sm:max-w-xs" />
         <Skeleton className="h-8 w-28 rounded-lg" />
         <Skeleton className="h-8 w-28 rounded-lg" />
+        <Skeleton className="ml-auto h-9 w-24 rounded-lg" />
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className="flex h-10 items-center gap-6 border-b px-2">
@@ -186,38 +198,6 @@ export function ContactsSkeleton() {
             <Skeleton className="hidden h-4 w-20 sm:block" />
           </div>
         ))}
-      </div>
-    </SkeletonScreen>
-  );
-}
-
-/** Ficha completa (persona o empresa): encabezado, tarjetas de resumen y pestañas. */
-export function ProfileSkeleton() {
-  return (
-    <SkeletonScreen>
-      <div className="flex items-center gap-3 border-b px-4 py-4 md:px-6">
-        <Skeleton className="size-9 rounded-md" />
-        <Skeleton className="size-11 rounded-full" />
-        <div className="flex-1 space-y-2">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-4 w-32" />
-        </div>
-        <Skeleton className="h-9 w-32 rounded-lg" />
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6">
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-24 rounded-xl" />
-            ))}
-          </div>
-          <div className="flex h-11 items-center gap-6 border-b">
-            {["w-16", "w-28", "w-32", "w-12"].map((w, i) => (
-              <Skeleton key={i} className={cn("h-3.5", w)} />
-            ))}
-          </div>
-          <Skeleton className="h-64 rounded-xl" />
-        </div>
       </div>
     </SkeletonScreen>
   );
@@ -277,6 +257,43 @@ export function StatsSkeleton() {
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-3 w-72" />
           <Skeleton className="h-3 w-56" />
+        </div>
+      </div>
+    </SkeletonScreen>
+  );
+}
+
+// --- Agentes ----------------------------------------------------------------------
+
+/** Tarjeta del asistente, resumen del mes y registro (mismas medidas que AgentsView). */
+export function AgentsSkeleton() {
+  return (
+    <SkeletonScreen>
+      <PageHeader title="Agentes" description={AGENTS_DESCRIPTION} />
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+          <div className="rounded-2xl border p-5">
+            <div className="flex gap-4">
+              <Skeleton className="size-12 shrink-0 rounded-2xl" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="h-4 w-full max-w-sm" />
+                <Skeleton className="h-5 w-28 rounded-full" />
+              </div>
+              <Skeleton className="h-5 w-24" />
+            </div>
+            <div className="mt-5 flex flex-wrap items-center gap-6 border-t pt-5">
+              <Skeleton className="h-9 w-52 rounded-lg" />
+              <Skeleton className="h-11 w-44" />
+              <Skeleton className="ml-auto h-9 w-28 rounded-lg" />
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-20 rounded-2xl" />
+            ))}
+          </div>
+          <Skeleton className="h-64 rounded-2xl" />
         </div>
       </div>
     </SkeletonScreen>

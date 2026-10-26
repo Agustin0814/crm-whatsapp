@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
       { source: "/ajustes", destination: "/configuracion", permanent: false },
       { source: "/etiquetas", destination: "/configuracion?tab=etiquetas", permanent: false },
       { source: "/respuestas-rapidas", destination: "/configuracion?tab=respuestas-rapidas", permanent: false },
+      // Las fichas completas se retiraron: todo se ve en el panel lateral.
+      { source: "/contactos/persona/:id", destination: "/contactos", permanent: false },
+      { source: "/contactos/empresa/:id", destination: "/contactos", permanent: false },
     ];
   },
   turbopack: {

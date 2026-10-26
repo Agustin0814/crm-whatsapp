@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOutIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
+import { BotIcon, LogOutIcon, MonitorIcon, MoonIcon, SunIcon, type LucideIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -31,14 +31,23 @@ import { ContactAvatar } from "./contact-avatar";
 import { profileName, useCrm } from "./crm-provider";
 import { useNotifications, type RealtimeStatus } from "./notifications-provider";
 
-type NavItem = { href: string; label: string; icon: IconName };
+type NavItem = { href: string; label: string; icon: IconName | LucideIcon };
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Bandeja", icon: "bandeja" },
   { href: "/contactos", label: "Contactos", icon: "contactos" },
+  // Provisional: Bot de lucide hasta que exista public/icons/icon-agentes.svg.
+  { href: "/agentes", label: "Agentes", icon: BotIcon },
   { href: "/estadisticas", label: "Estadísticas", icon: "estadisticas" },
   { href: "/configuracion", label: "Configuración", icon: "configuracion" },
 ];
+
+/** Icono de una opción del menú: de la marca (public/icons) o de lucide. */
+function NavIcon({ icon, className }: { icon: NavItem["icon"]; className?: string }) {
+  if (typeof icon === "string") return <Icon name={icon} className={className} />;
+  const LucideComp = icon;
+  return <LucideComp className={cn("shrink-0", className)} strokeWidth={2} aria-hidden />;
+}
 
 function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -301,8 +310,8 @@ function Sidebar({ initialCollapsed }: { initialCollapsed: boolean }) {
                 <span className={cn(CAPA_FILA, !active && "group-hover/fila:bg-lateral-hover")} aria-hidden />
                 <span className={COLUMNA_ICONO}>
                   {/* Icono activo algo más grande (transform: no toca el layout) y con su color */}
-                  <Icon
-                    name={item.icon}
+                  <NavIcon
+                    icon={item.icon}
                     className={cn(
                       // Tailwind v4: scale-* usa la propiedad CSS "scale" (no "transform").
                       "size-6 transition-[color,scale] duration-200 ease-out motion-reduce:transition-none",
@@ -501,7 +510,7 @@ function BottomNav() {
           >
             {active && <span className="absolute inset-x-6 top-0 h-0.5 rounded-b-full bg-lateral-acento" aria-hidden />}
             <span className="relative">
-              <Icon name={item.icon} className={cn("size-6", active && "text-lateral-activo-icono")} />
+              <NavIcon icon={item.icon} className={cn("size-6", active && "text-lateral-activo-icono")} />
               {badge > 0 && <UnreadBadge count={badge} className="absolute -top-1.5 -right-3" />}
             </span>
             {item.label}

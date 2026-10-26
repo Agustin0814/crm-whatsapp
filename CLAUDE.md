@@ -24,7 +24,7 @@ CRM propio para administrar los mensajes de WhatsApp Business. Responder y comen
 - `contacts.wa_id` puede ser null (contactos creados a mano sin WhatsApp): mostrar `wa_id ?? phone` y no permitir enviar mensajes a un contacto sin `wa_id`.
 
 ## Base de datos (Supabase, RLS activado)
-Tablas: `profiles`, `contacts`, `conversations`, `messages`, `tags`, `contact_tags`, `notes`, `quick_replies`, y las de contactos y ventas (ver «Contactos, empresas y ventas»).
+Tablas: `profiles`, `contacts`, `conversations`, `messages`, `tags`, `contact_tags`, `notes`, `quick_replies`, las de contactos y ventas (ver «Contactos, empresas y ventas») y las de agentes (ver «Agentes de IA»).
 - Los tipos están en `src/lib/supabase/database.types.ts` (regenerarlos con `generate_typescript_types` si cambia el esquema). Revisar el esquema real antes de escribir queries.
 - Cambios de esquema solo con migraciones (`apply_migration`) y después `get_advisors` (seguridad y rendimiento).
 - El trigger `messages_touch_conversation` (AFTER INSERT en `messages`) actualiza `last_message_at`, `last_message_preview`, `last_inbound_at` y `unread_count` de `conversations`. **No repetir esa lógica en el código.**
@@ -32,11 +32,12 @@ Tablas: `profiles`, `contacts`, `conversations`, `messages`, `tags`, `contact_ta
 - `conversations.status`: `open | pending | resolved | archived` (etiquetas en `src/lib/crm/types.ts`).
 - Una conversación por contacto (`conversations.contact_id` es único).
 - `contacts.updated_at` se actualiza solo (trigger `contacts_set_updated_at`).
-- Realtime publica `messages`, `conversations` y `notes`.
+- Realtime publica `messages`, `conversations`, `notes` y `agent_suggestions`.
 - El trigger también guarda `conversations.last_message_type` (icono de la vista previa) y usa etiquetas en español para mensajes sin texto («Imagen», «Audio», «Video», «Documento», «Sticker», «Mensaje»); si hay leyenda, la vista previa es la leyenda.
 
 ### Roles y RLS (migración `crm_roles_y_politicas`)
-- `profiles.role`: `admin | agent`. Helper `private.is_admin()` (esquema `private`, no expuesto por la API).
+- `profiles.role`: `superadmin | admin | agent` («Proveedor», «Administrador», «Agente»). Helpers `private.is_admin()` (verdadero para admin Y superadmin) y `private.is_superadmin()` (esquema `private`, no expuesto por la API). En el código: `isAdminRole()` (`src/lib/crm/types.ts`), `useCrm().isAdmin` / `isSuperadmin` y `requireAdmin()`.
+- Superadmin = el proveedor: solo él da o quita ese rol (trigger `profiles_protect_role`), solo otro superadmin lo elimina y es el único que ve y edita la capa bloqueada de los agentes. Se asigna por SQL.
 - Solo admin: cambiar roles (trigger `profiles_protect_role`; además impide quedarse sin admins), eliminar etiquetas, crear/editar/borrar respuestas rápidas, gestionar usuarios.
 - Todos los autenticados: leer y editar contactos, conversaciones, mensajes, etiquetas (sin borrar) y notas propias. Las notas las edita o borra su autor o un admin.
 - Las restricciones viven en la base; la interfaz solo oculta o deshabilita botones.
@@ -56,40 +57,104 @@ Tablas: `profiles`, `contacts`, `conversations`, `messages`, `tags`, `contact_ta
 - Reglas y límites compartidos cliente/servidor en `src/lib/media/rules.ts`: el tipo se detecta por los primeros bytes (`detectMime`), nunca por la extensión; nombres saneados (`sanitizeFilename`); HTML/SVG/XML se guardan como `application/octet-stream`.
 - Fuera de alcance por ahora: grabar notas de voz en el navegador, plantillas y envíos masivos.
 
-### Contactos, empresas y ventas (migraciones `crm_contactos_empresas`, `crm_pedidos_pagos_directorio`, `crm_saldos_sin_full_join`, `crm_fix_detectar_prospecto`, `crm_pedidos_definer_privado`)
-- `contacts`: `wa_id` nullable, `phone_canonical` (generada con `public.normalize_phone`, índice ÚNICO), `classification`, `classification_source`, `classified_at`, `last_purchase_at`. La columna heredada `contacts.company` (texto) se conserva pero ya no se edita: la relación real son los vínculos.
-- `companies` (nombre comercial único sin distinguir mayúsculas, razón social, RFC, teléfono fijo, condiciones de pago y crédito, clasificación, `last_purchase_at`) y `company_tags` (las mismas etiquetas que los contactos).
-- `person_company_links` (persona ↔ empresa: `is_active`, `can_order`, `order_limit`, `requires_authorization`), `contact_roles` (catálogo; 6 del sistema que no se pueden borrar) y `link_roles`.
-- `orders` (folio `order_number` por identidad, cuenta = `contact_id` XOR `company_id`, `requested_by`, estados `pendiente_autorizacion | confirmado | entregado | cancelado`, `collect_on_delivery`, `authorization_reasons`), `order_items` (`line_total` generado), `payments` e `invoices` (registro administrativo; archivo opcional en el bucket privado `documentos`, ruta `facturas/{uid}/…`, 20 MB, pdf/jpg/png/xml).
+## Principio rector: todo ocurre en el chat
+- Este CRM es esencialmente mensajería. TODO ocurre dentro del chat, sin navegar a otras rutas ni pantallas (no hay páginas de detalle: la ficha es un panel).
+- Cada acción cuesta el mínimo de pasos: nada de diálogos con fechas, formularios largos ni botones encadenados.
+- Las notas son UNA sola cosa: las notas internas del chat (autor, fecha y hora automáticos). Las «Notas generales» de la ficha son solo un texto editable.
+- Las compras son UN contador.
+- Agentes de IA: el primero (Asistente de respuestas) ya existe (ver «Agentes de IA»); vendrán otros (asistente que toma notas). Por eso la lógica vive en funciones de servidor reutilizables y NO se duplica en componentes: `add_internal_note`, `update_purchase_count`, `set_classification` y el motor de `src/lib/agents/`.
+
+## Principio rector: esto es un CRM, no un ERP
+- NO se llevan pedidos, productos, montos, gastos, pagos, facturas, saldos, crédito ni inventario.
+- De cada cliente solo interesa CUÁNTAS compras ha hecho (un contador) y, si el usuario quiere, una nota con fecha de qué compró.
+- **Antes de agregar cualquier función nueva de ventas, comprobar que respeta este principio.** Si pide montos, productos o estados de pedido, no va.
+
+### Contactos, empresas y compras (migraciones `crm_contactos_empresas`, `crm_contador_compras` y anteriores)
+- `contacts`: `wa_id` nullable, `phone_canonical` (generada con `public.normalize_phone`, índice ÚNICO), `classification`, `classification_source`, `classified_at`, `purchase_count`, `last_purchase_at`. La columna heredada `contacts.company` (texto) se conserva pero ya no se edita: la relación real son los vínculos.
+- `companies` (nombre comercial único sin distinguir mayúsculas, razón social, RFC, teléfono, correo, dirección, notas, clasificación, `purchase_count`, `last_purchase_at`) y `company_tags` (las mismas etiquetas que los contactos).
+- `person_company_links` (persona ↔ empresa, `is_active`), `contact_roles` (catálogo de funciones; 6 del sistema que no se pueden borrar) y `link_roles`.
 - `classification_history` (solo lectura, la llenan triggers), `classification_suggestions` (como máximo una pendiente por contacto) y `app_settings` (`inactivity_days`, `intent_keywords`; solo admin escribe).
-- Vistas (`security_invoker`): `account_balances` (pedidos confirmados o entregados − pagos, por cuenta) y `contact_directory` (personas y empresas juntas con `is_inactive`, `last_interaction`, nombres relacionados, etiquetas y funciones).
-- Funciones con `search_path` fijo. Las SECURITY DEFINER viven en `private`, validan `auth.uid()` y el rol dentro de la función y no las ejecuta `anon`; en `public` solo hay envoltorios INVOKER: `create_order`, `approve_order`, `set_classification`, `resolve_suggestion`, `search_directory`, `normalize_phone` y `upsert_whatsapp_contact` (solo `service_role`).
-- Las reglas se aplican en la base con triggers (`private.protect_company_credit`, `protect_link_permissions`, `protect_order`, `stamp_classification`, `log_classification`, `apply_order_purchase`, `detect_prospect_signal`, `check_account_order`). La interfaz solo oculta o deshabilita.
+- Vista `contact_directory` (`security_invoker`): personas y empresas juntas con `is_inactive`, `last_interaction` (último mensaje o compra), nombres relacionados, etiquetas, funciones, `purchase_count` y `last_purchase_at`. `search_directory(...)` la filtra.
+- `public.update_purchase_count(p_entity, p_id, p_action, p_value, p_undo)` (envoltorio INVOKER de una DEFINER en `private`, valida rol con `private.require_staff()`, bloquea la fila): `increment | decrement | set | undo`. Devuelve el estado y, en `increment`, lo necesario para deshacer (la base lo vuelve a validar). `public.add_internal_note(p_conversation_id, p_body)` crea notas internas. `contacts_summary()` da los conteos de las tarjetas de /contactos.
+- `purchase_count` y `last_purchase_at` solo cambian dentro de `update_purchase_count` (trigger `protect_purchase_fields`, variable de sesión `app.purchase_internal`): un update directo se rechaza.
+- **Pendiente de eliminar con confirmación del usuario** (ya no se usan en la interfaz ni en el directorio): `entity_notes` y sus funciones (`register_purchase`, `add_entity_note`, `adjust_purchase_count`, `delete_entity_note`, `last_purchase_from_history`), `orders`, `order_items`, `payments`, `invoices`, la vista `account_balances`, el bucket `documentos`, las funciones de pedidos/crédito y las columnas de crédito de `companies` y de permisos de compra de `person_company_links`. No construir nada sobre ellas.
 
 ## Reglas de negocio de contactos
-1. **Tipos.** Hay personas (`contacts`) y empresas (`companies`). Una persona puede estar vinculada a varias empresas con una o más funciones (Propietario, Comprador autorizado, Responsable de pagos…). Desvincular = desactivar el vínculo (se conserva el historial); borrar un vínculo es solo de admin.
-2. **Clasificación** (`unclassified | prospect | customer | supplier`: «Sin clasificar», «Prospecto», «Cliente», «Proveedor»), por persona y por empresa. Cada cambio queda en `classification_history` con origen (`default | suggestion | manual | order`), usuario y motivo. La etiqueta «Cliente» que ya existía es independiente y no se toca.
+1. **Tipos.** Hay personas (`contacts`) y empresas (`companies`). Una persona puede estar vinculada a varias empresas con una o más funciones (Propietario, Comprador autorizado, Responsable de pagos…). Desvincular = desactivar el vínculo (se conserva el historial); borrar un vínculo es solo de admin. Los vínculos NO tienen permisos de compra.
+2. **Clasificación** (`unclassified | prospect | customer | supplier`: «Sin clasificar», «Prospecto», «Cliente», «Proveedor»), por persona y por empresa. Cada cambio queda en `classification_history` con origen (`default | suggestion | manual | purchase`; `order` solo en datos anteriores), usuario y motivo. La etiqueta «Cliente» que ya existía es independiente y no se toca.
 3. **Prospecto: solo sugerencia.** Si un contacto «Sin clasificar» manda un texto con una palabra de `intent_keywords` (sin acentos ni mayúsculas, al inicio de palabra: «obra» detecta «obras» pero no «maniobra»), se crea una sugerencia pendiente y el chat muestra «Posible prospecto: …». El agente la acepta (pasa a Prospecto con origen `suggestion`) o la descarta. Nunca se clasifica solo, y la detección nunca bloquea el guardado del mensaje.
-4. **Cliente: por pedido.** Al confirmarse (o entregarse) un pedido, la CUENTA que lo paga pasa de Sin clasificar o Prospecto a Cliente (origen `order`, motivo «Pedido #N») y se actualiza su `last_purchase_at`. En los pedidos de empresa cambia la empresa, no el solicitante. Un Proveedor que compra sigue siendo Proveedor (solo se actualiza la fecha). Un pedido pendiente de autorización no promueve ni suma al saldo hasta que se aprueba.
-5. **Inactivo.** Un Cliente sin compras en `inactivity_days` días (90 por defecto, editable en Configuración → Contactos y ventas) se muestra «Inactivo». Si nunca compró (lo marcaron a mano), cuenta desde `classified_at`.
-6. **Teléfonos únicos entre personas** (normalizados: 10 dígitos, 52 + 10 y 521 + 10 son el mismo número). Un duplicado muestra un aviso en español con enlace al contacto existente (`notifyDuplicatePhone`). El fijo compartido va en la empresa.
-7. **Crédito y condiciones** (`contado | credito`, días y límite): solo un admin los cambia, y queda registrado quién y cuándo autorizó. Una empresa creada por un agente siempre nace de contado.
-8. **Permisos de pedido** del vínculo (puede pedir, límite por pedido, requiere autorización): solo admin.
-9. **Pedidos** (`rpc("create_order")`; la base calcula el total). Quedan **pendientes de autorización** si: (a) el solicitante no está vinculado, el vínculo está inactivo o no puede pedir; (b) el total supera su límite por pedido; (c) saldo + pedido supera el límite de crédito de la empresa; (d) el vínculo exige autorización siempre. Solo un admin aprueba (`rpc("approve_order")`, con motivo obligatorio). Cancelado es definitivo y nada vuelve a pendiente.
-10. **Cobrar al entregar**: todo pedido personal y todo pedido de una empresa sin crédito autorizado.
-11. **Saldo** = pedidos confirmados o entregados − pagos (`account_balances`). Cualquiera registra pagos y facturas; corregir o borrar un pago y cambiar el estado de una factura es solo de admin. Un pago o una factura ligados a un pedido deben ser de la misma cuenta.
-12. **Pedidos personales y como empleado**: la ficha de la persona separa sus compras propias (`orders.contact_id`) de los pedidos que hizo a nombre de empresas (`requested_by` con `company_id`).
-13. Fuera de alcance: inventario, catálogo de productos, CFDI, cuentas por pagar, cobranza automática por WhatsApp y documentos de cotización.
+4. **Compras = contador en la ficha** (sección Datos, fila «Compras»: − número +; el número se puede escribir). Mismas reglas para personas y empresas, todo en `update_purchase_count`:
+   - **+**: suma 1, `last_purchase_at` = ahora y, si estaba Sin clasificar o Prospecto, pasa a Cliente (origen `purchase`, queda en `classification_history`). Un Proveedor sigue siendo Proveedor. Sin diálogos; la interfaz cambia al instante (optimista, con retroceso si falla) y muestra «Compra registrada · Deshacer» ~6 s.
+   - **Deshacer**: restaura contador, `last_purchase_at` y, si ese clic cambió la clasificación, la clasificación anterior con su origen y fecha. Solo si nadie cambió el contador desde entonces.
+   - **−**: resta 1 (nunca bajo 0); en 0, `last_purchase_at` queda vacío. **Escribir el número**: lo fija sin crear registros. Ninguno de los dos revierte la clasificación.
+5. **Qué compró** NO se registra en el contador: se escribe como nota interna del chat (fecha y hora automáticas).
+6. **Fichas sin cambiar de página**: en /contactos, clic en una fila abre la MISMA ficha del chat (`ContactDetails`; `CompanyDetails` para empresas) en un panel lateral (`EntityPanel`, URL `?ficha=persona.<id>` o `empresa.<id>`). Con conversación hay «Abrir chat». Una persona sin conversación solo tiene notas generales. Las URLs viejas `/contactos/persona/:id` y `/contactos/empresa/:id` redirigen a /contactos.
+7. **Inactivo.** Un Cliente sin compras en `inactivity_days` días (90 por defecto, editable en Configuración → Contactos y ventas) se muestra «Inactivo». Si nunca compró (lo marcaron a mano), cuenta desde `classified_at`.
+8. **Teléfonos únicos entre personas** (normalizados: 10 dígitos, 52 + 10 y 521 + 10 son el mismo número). El fijo compartido va en la empresa. Ver «Teléfonos duplicados».
+9. **/contactos**: tres tarjetas (Contactos = personas, Clientes = personas y empresas con «N inactivos», Empresas) que filtran la lista; buscador, pestañas por clasificación, filtros de etiquetas y funciones, «Nuevo» y la columna «Compras» (solo lectura, con la última compra). El título solo existe para lectores de pantalla (`sr-only`). La clasificación de la ficha es UNA línea: selector, origen y fecha en pequeño e historial tras un icono.
+10. Fuera de alcance (principio rector): pedidos, productos, montos, pagos, facturas, saldos, crédito, inventario, CFDI, cobranza y cotizaciones.
+
+## Teléfonos duplicados (migración `crm_telefonos_duplicados`)
+- `companies.phone_canonical`: columna generada con `public.normalize_phone(phone)` (la misma de personas), índice NO único (un fijo de oficina puede repetirse). `companies.phone` se guarda tal como se capturó.
+- `public.find_phone_matches(p_phone, p_exclude_kind, p_exclude_id)`: coincidencias entre personas (`phone_canonical` o `wa_id`) y empresas (`phone_canonical`) con tipo, id, nombre, clasificación, si la persona tiene conversación y si ya existe un vínculo activo con el registro excluido. «6444075142», «+52 644 407 5142», «52 644 407 5142» y «5216444075142» son el mismo número; con menos de 10 dígitos no busca.
+- Guardados verificados en la base (INVOKER, `search_path` fijo, solo `authenticated`, validan el rol con `private.require_staff()`): `create_person`, `create_company`, `update_phone`. Devuelven jsonb `created | updated | blocked | needs_confirmation | name_taken`. El cliente manda los ids que el usuario vio (`p_acknowledged`); el servidor vuelve a buscar y, si aparece una coincidencia no confirmada, NO guarda y responde `needs_confirmation`.
+- **Nunca** cambiar `contacts.phone` ni `companies.phone` con un update directo desde la interfaz: `updateContact` y `updateCompany` descartan `phone`; se usa `PhoneField` (edición) o `NewEntryDialog` (alta), que llaman a esas funciones.
+- Reglas:
+  1. Persona con el teléfono de otra persona: BLOQUEO («Este número ya está registrado como X», con «Abrir contacto» y «Editar ese contacto» → panel en `/contactos?ficha=persona.<id>&editar=1`). Lo garantiza el índice único `contacts_phone_canonical_key`; si dos altas chocan a la vez, la función traduce el `unique_violation` a `blocked`.
+  2. Empresa con el teléfono de una persona: advertencia con «Vincular a esta empresa» (funciones, sugerida «Contacto principal»), «Crear de todos modos» o «Cancelar». Al crear, la empresa y el vínculo se hacen en UNA transacción (`create_company` con `p_link_contact_id`).
+  3. Persona con el teléfono de una empresa: «Este número es de la empresa X» con «Crear y vincular a esa empresa», «Crear de todos modos» o «Cancelar».
+  4. Empresa con el teléfono de otra empresa: «Posible duplicado» con «Abrir esa empresa», «Crear de todos modos» o «Cancelar».
+  5. Lo mismo al editar un teléfono (el registro se excluye a sí mismo; las coincidencias ya vinculadas no piden confirmación).
+  6. Vincular (`public.link_contact_to_company`) nunca cambia clasificaciones (los vínculos no tienen permisos de compra).
+- Aviso del chat (`CompanyMatchBanner`): `public.company_phone_matches(p_contact_id)` devuelve empresas con el mismo teléfono que la persona, sin vínculo activo y no descartadas. Se calcula al vuelo (no hay trigger en el webhook ni se vincula solo). Los descartes viven en `phone_match_dismissals` (persona, empresa, quién y cuándo; insertar solo con `dismissed_by = auth.uid()`, borrar solo admin). No se reutilizó `classification_suggestions` porque es de clasificación, no tiene empresa y solo admite una pendiente por contacto.
+- Presentación: todos los teléfonos se muestran con `formatPhone` («+52 644 407 5142», también 10 dígitos y empresas). Solo es visual.
+
+## Agentes de IA (migración `crm_agentes_ia`)
+Principio: el agente es MENSAJERÍA. Solo responde en el chat; ninguna herramienta toca contactos, clasificaciones, notas, compras ni nada de ERP.
+
+### Dos capas de configuración
+- **Capa editable** (`agents.config` jsonb, admin): información del negocio, tono, horario (`always | after_hours | custom`, America/Hermosillo), retraso (0–10 min), alcance (clasificaciones, por defecto Sin clasificar y Prospecto; etiquetas excluidas), límites (respuestas seguidas, tope diario), escalamiento (temas, mensaje de traspaso, a quién asignar), instrucciones adicionales (máx. 1000) y alertas. Forma y recortes en `src/lib/agents/config.ts` (`parseAgentConfig`, compartido cliente/servidor, sin secretos).
+  - Se guarda SOLO con `public.update_agent_settings(p_key, p_enabled, p_mode, p_config)` (null = no cambiar); la base recorta a los techos. `agents` no tiene UPDATE directo. `public.agent_limits(p_key)` da los rangos permitidos sin exponer el prompt.
+- **Capa bloqueada** (`agent_locked_config`, RLS solo superadmin): identidad, reglas de seguridad, modelo, temperatura (null = la del modelo), `max_output_tokens`, `reasoning_effort` (low), herramientas permitidas, techos (`max_consecutive_ceiling`, `daily_cap_ceiling`, `monthly_token_cap`), precios por millón para el costo estimado y `kill_switch`. El motor la lee con service role.
+- Respuestas rápidas: `quick_replies.when_to_use` y `agent_permission` (`automatic | approval | human_only`, por defecto human_only). `human_only` nunca la ve el modelo; `approval` siempre queda como sugerencia, aun en automático.
+
+### Motor (`src/lib/agents/`; solo servidor salvo `config.ts`, `guards.ts` y `client.ts`)
+- `provider.ts`: interfaz agnóstica `generateReply({system, messages, tools, limits})` → herramienta elegida + tokens REALES. Implementación `providers/openai.ts` (Responses API con fetch, `tool_choice: required`, `store: false`, `OPENAI_API_KEY`). Otro proveedor = otra implementación.
+- `prompt.ts`: orden fijo (a) identidad + reglas bloqueadas (+ guardia base anti prompt injection), (b) negocio, (c) tono, (d) respuestas rápidas con «cuándo usarla», (e) instrucciones del cliente SIEMPRE debajo, (f) historial (20 mensajes; el texto del cliente es dato no confiable). Herramientas: `enviar_respuesta_rapida(shortcut)`, `responder_texto_corto(texto)`, `transferir_a_humano(motivo)`.
+- `guards.ts` (puro): horario, temas de escalamiento (sin acentos, al inicio de palabra), alcance y costo.
+- `engine.ts`: `scheduleAgentsForInbound` (lo llama el webhook tras guardar un entrante NUEVO) y `processDueRuns`. Guardas en orden; cada una registra outcome y motivo en `agent_usage_log`: habilitado → kill switch → pausado → ventana 24 h → contacto con WhatsApp → nadie respondió ya → (automático) nadie abrió el chat (`conversations.human_seen_at`, lo pone `markRead`) → alcance → horario → respuestas seguidas (al llegar al límite, traspaso) → tope diario → tope mensual de tokens (alerta al superadmin) → tema de escalamiento (traspaso sin gastar tokens) → modelo.
+- `send.ts`: `sendAgentText` reutiliza `sendTextMessage` (con `toSendableNumber`) y la ventana de 24 h; guarda con `sent_by_agent = true` y `agent_id` usando el cliente admin.
+- Modo sugerencia (por defecto): `agent_suggestions` (máx. una pendiente por conversación, Realtime) → banner «Sugerencia del asistente» (Enviar / Editar / Descartar) que llama a `POST /api/agents/suggestions/[id]`. El mensaje enviado lleva «Asistente» y el `sender_id` de quien lo aprobó. Modo automático: envía directo.
+- Traspaso: envía (o sugiere) el mensaje de traspaso, pausa con motivo `handoff`/`limit_consecutive`, asigna si está configurado y crea una alerta.
+
+### Pausa y respuestas seguidas (triggers; no repetir en código)
+- `messages_agent_outbound`: saliente del agente → `agent_consecutive_count + 1`; saliente de una persona → pausa (`human_replied`), reinicia el contador y cancela la corrida y la sugerencia pendientes.
+- `conversations_agent_update`: asignar a alguien → pausa (`assigned`); al pausar se cancela la corrida pendiente; un usuario nunca cambia `agent_consecutive_count` directamente.
+- `public.set_agent_paused(p_conversation_id, p_paused)`: interruptor del encabezado del chat (`AgentPauseToggle`); reanudar reinicia el contador.
+- `messages_protect_agent_fields`: solo el servidor (sin sesión) puede marcar `sent_by_agent`/`agent_id`.
+
+### Programación con retraso
+- `agent_scheduled_runs` (`pending | running | done | cancelled | skipped`): UNA pendiente por conversación (índice único parcial); un entrante nuevo la pospone. `schedule_agent_run` y `claim_agent_runs` (FOR UPDATE SKIP LOCKED; reintenta una vez las `running` de más de 5 min) son solo de service role.
+- pg_cron cada minuto ejecuta `private.agent_cron_tick()`, que SOLO si hay corridas vencidas llama con pg_net a `POST /api/agents/run` con `Authorization: Bearer CRON_SECRET` (URL y secreto en Vault: `agents_runner_url`, `cron_secret`). La ruta está excluida del proxy y valida el secreto en tiempo constante (`src/lib/agents/cron-auth.ts`). Con retraso 0 se procesa en el `after()` del webhook.
+
+### Uso y alertas
+- `agent_usage_log` (outcome `sent | suggested | skipped | handoff | error | blocked_by_limit`, tokens reales, `est_cost_usd`), vista `agent_usage_monthly` (mes de Hermosillo) y `public.agent_usage_summary(p_key)` (hoy y mes contra el tope). Sin tablas duplicadas.
+- `agent_alerts` (`handoff | daily_cap | token_cap | error`, `audience` admin o superadmin; una por día o mes de cada tipo).
+
+### Interfaz
+- `/agentes` (`src/components/agents/`): tarjeta (interruptor, modo, estado, uso de hoy, «Configurar»), resumen del mes, alertas y registro de actividad (solo admin). El panel lateral (`Sheet`) tiene la capa editable en secciones colapsables y, solo para superadmin, la pestaña «Capa bloqueada». Los agentes humanos ven el estado pero no editan.
+- Icono del menú: provisional `Bot` de lucide (`NAV_ITEMS` acepta `IconName | LucideIcon`) hasta que exista `public/icons/icon-agentes.svg`.
+- Preparado, sin construir: pestaña «Probador» (chat de prueba sin enviar a WhatsApp). Debe reutilizar `buildSystemPrompt` + `getModelProvider()` sin `sendAgentText`.
 
 ## Estructura de la app
-- `src/app/(crm)/`: rutas protegidas con layout común (navegación lateral + proveedores). Páginas: `/` (Bandeja, `?c=<id>` abre una conversación), `/contactos`, `/contactos?tab=todos|sin-clasificar|prospectos|clientes|proveedores|empresas`, `/contactos/persona/[id]` y `/contactos/empresa/[id]` (fichas completas; con Cache Components los `params` se leen dentro de `<Suspense>`), `/estadisticas` (provisional, «Próximamente») y `/configuracion?tab=perfil|usuarios|notificaciones|apariencia|etiquetas|respuestas-rapidas|funciones|contactos-ventas`. `/ajustes`, `/etiquetas` y `/respuestas-rapidas` redirigen ahí (`next.config.ts`).
+- `src/app/(crm)/`: rutas protegidas con layout común (navegación lateral + proveedores). Páginas: `/` (Bandeja, `?c=<id>` abre una conversación), `/contactos`, `/contactos?tab=todos|sin-clasificar|prospectos|clientes|proveedores|empresas`, (la ficha se abre como panel con `?ficha=`), `/agentes` (asistentes de IA), `/estadisticas` (provisional, «Próximamente») y `/configuracion?tab=perfil|usuarios|notificaciones|apariencia|etiquetas|respuestas-rapidas|funciones|contactos-ventas`. `/ajustes`, `/etiquetas` y `/respuestas-rapidas` redirigen ahí (`next.config.ts`).
 - `src/components/crm/`: `CrmProvider` (usuario actual, perfiles y etiquetas: `useCrm()`), `NotificationsProvider` (sonido MP3 con desbloqueo tras la primera interacción y máximo uno por segundo, contador en el título, notificaciones del navegador y estado REAL de Realtime: `useNotifications()`), `AppShell` (barra lateral colapsable ≥ 768 px y barra inferior < 768 px: `useShell()`), avatar, chips, estados vacíos.
 - Avatares: lógica única en `src/lib/crm/avatar.ts` (`avatarFor`): emoji inicial completo, icono «empresa» si hay empresa, iniciales o icono «persona». Recorrer nombres por grafemas (`Intl.Segmenter`), nunca con `name[0]`.
 - `src/components/inbox/`: bandeja (`inbox.tsx` orquesta el estado, Realtime y el layout adaptable), lista con filtros y scroll infinito, chat (botón «notas» alterna con las notas internas), composer con ventana de 24 h, chips y menú «/» de respuestas rápidas, emojis y adjuntos (selector, arrastrar y soltar, pegar). Multimedia en `src/components/inbox/media/` (URL firmada perezosa con `useMediaUrl`, visor, reproductor de audio, documentos solo descargables).
-- `src/components/contacts/`: ficha editable (`ContactDetails`, guardado automático al salir del campo), clasificación con historial (`ClassificationControl`), vínculos persona–empresa (`CompanyLinks`), selectores de empresa/persona/etiquetas, directorio (`ContactsView`, usa `search_directory`), fichas completas (`PersonPage`, `CompanyPage`) y alta (`NewEntryDialog`).
-- `src/components/orders/`: diálogo de pedido (`OrderDialog`, desde la ficha, la empresa o el menú ⋮ del chat), lista de pedidos con autorización, pagos y facturas, `useAccountData` (pedidos, pagos, facturas y saldo de una cuenta).
+- `src/components/contacts/`: ficha editable (`ContactDetails`, guardado automático al salir del campo), clasificación con historial (`ClassificationControl`), vínculos persona–empresa (`CompanyLinks`), selectores de empresa/persona/etiquetas, directorio (`ContactsView`, usa `search_directory`), panel de fichas (`EntityPanel`, `CompanyDetails`) y alta (`NewEntryDialog`).
+- Contador de compras: `src/components/contacts/purchase-counter.tsx`; panel de fichas: `entity-panel.tsx`; tarjetas de /contactos: `summary-cards.tsx`.
 - Un componente con `usePathname()` en el layout debe ir dentro de `<Suspense>`: en rutas con `[id]` el pathname es dato de petición (por eso `TitleCounter` está aparte en `NotificationsProvider`).
-- `src/lib/crm/`: tipos, consultas (`contacts.ts`, `companies.ts`, `orders.ts`, `classification.ts`), filtros, plantillas (`{{nombre}}`, `{{primer_nombre}}`, `{{telefono}}`, `{{empresa}}`).
+- `src/lib/crm/`: tipos, consultas (`contacts.ts`, `companies.ts`, `purchases.ts`, `phones.ts`, `classification.ts`), filtros, plantillas (`{{nombre}}`, `{{primer_nombre}}`, `{{telefono}}`, `{{empresa}}`).
 - `src/app/api/admin/users`: listar, crear y eliminar usuarios (verifica sesión y rol con `requireAdmin()` antes de usar la service role).
 
 ## Diseño
@@ -115,7 +180,7 @@ Tablas: `profiles`, `contacts`, `conversations`, `messages`, `tags`, `contact_ta
 
 ## Secretos y clientes de Supabase
 - Nunca poner secretos en el código ni en logs (ni tokens, ni payloads completos, ni correos o contraseñas de usuarios). Todo va en `.env.local`, que no se muestra ni se sube a git.
-- Variables: `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-- `src/lib/supabase/admin.ts` usa `SUPABASE_SERVICE_ROLE_KEY`: solo del lado del servidor (webhook, descarga de medios entrantes, limpieza de subidas descartadas y `/api/admin/*` después de `requireAdmin()`). Nunca importarlo desde componentes cliente.
+- Variables: `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY` y `CRON_SECRET` (las dos últimas solo en servidor, con `serverEnv`).
+- `src/lib/supabase/admin.ts` usa `SUPABASE_SERVICE_ROLE_KEY`: solo del lado del servidor (webhook, descarga de medios entrantes, limpieza de subidas descartadas, motor de agentes, `/api/agents/*` y `/api/admin/*` después de `requireAdmin()`). Nunca importarlo desde componentes cliente.
 - `src/lib/supabase/server.ts`: cliente con la sesión del usuario (route handlers / server components).
 - `src/lib/supabase/client.ts`: cliente del navegador (respeta RLS). Todas las acciones del usuario van por aquí o por rutas que verifican sesión y rol.

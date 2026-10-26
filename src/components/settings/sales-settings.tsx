@@ -120,7 +120,7 @@ export function SalesSettings() {
             Días sin compra para «Inactivo»
           </Label>
           <p className="text-sm text-texto-suave">
-            Un cliente sin pedidos confirmados en este periodo se marca «Inactivo» (si nunca compró, cuenta desde que se
+            Un cliente sin compras registradas en este periodo se marca «Inactivo» (si nunca compró, cuenta desde que se
             clasificó como cliente).
           </p>
         </div>
