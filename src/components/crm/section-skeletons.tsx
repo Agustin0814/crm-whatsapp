@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { PageHeader } from "@/components/crm/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AGENTS_DESCRIPTION } from "@/lib/agents/config";
 import { cn } from "@/lib/utils";
 
 /*
@@ -265,35 +264,66 @@ export function StatsSkeleton() {
 
 // --- Agentes ----------------------------------------------------------------------
 
-/** Tarjeta del asistente, resumen del mes y registro (mismas medidas que AgentsView). */
+/** Identidad de un agente (icono, nombre y descripción), como en AgentsView. */
+function AgentIdentitySkeleton() {
+  return (
+    <div className="flex items-center gap-3">
+      <Skeleton className="size-10 shrink-0 rounded-xl" />
+      <div className="space-y-1.5">
+        <Skeleton className="h-4 w-44" />
+        <Skeleton className="h-3 w-64 max-w-full" />
+      </div>
+    </div>
+  );
+}
+
+/** Tarjetas de uso arriba y lista de agentes debajo (mismas medidas que AgentsView). */
 export function AgentsSkeleton() {
   return (
     <SkeletonScreen>
-      <PageHeader title="Agentes" description={AGENTS_DESCRIPTION} />
+      <PageHeader title="Agentes" actions={<Skeleton className="h-9 w-48 rounded-lg" />} />
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-          <div className="rounded-2xl border p-5">
-            <div className="flex gap-4">
-              <Skeleton className="size-12 shrink-0 rounded-2xl" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-6 w-48" />
-                <Skeleton className="h-4 w-full max-w-sm" />
-                <Skeleton className="h-5 w-28 rounded-full" />
-              </div>
-              <Skeleton className="h-5 w-24" />
-            </div>
-            <div className="mt-5 flex flex-wrap items-center gap-6 border-t pt-5">
-              <Skeleton className="h-9 w-52 rounded-lg" />
-              <Skeleton className="h-11 w-44" />
-              <Skeleton className="ml-auto h-9 w-28 rounded-lg" />
-            </div>
-          </div>
+          {/* Tarjetas de uso del mes */}
           <div className="grid gap-3 sm:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-20 rounded-2xl" />
+            {[false, true, false].map((bar, i) => (
+              <div key={i} className="space-y-2 rounded-2xl border p-4">
+                <Skeleton className="h-3 w-28" />
+                <Skeleton className="h-6 w-24" />
+                {bar && <Skeleton className="h-1.5 w-full rounded-full" />}
+              </div>
             ))}
           </div>
-          <Skeleton className="h-64 rounded-2xl" />
+          {/* ≥ 768 px: tabla */}
+          <div className="hidden rounded-2xl border md:block">
+            <div className="flex h-10 items-center gap-6 border-b px-4">
+              <Skeleton className="h-3 w-14" />
+              <Skeleton className="ml-auto h-3 w-12" />
+              <Skeleton className="h-3 w-12" />
+              <span className="w-28" />
+            </div>
+            <div className="flex items-center gap-6 px-4 py-3">
+              <div className="flex-1">
+                <AgentIdentitySkeleton />
+              </div>
+              <Skeleton className="h-5 w-24 rounded-full" />
+              <Skeleton className="h-8 w-48 rounded-lg" />
+              <Skeleton className="h-8 w-28 rounded-lg" />
+            </div>
+          </div>
+          {/* < 768 px: tarjeta apilada */}
+          <div className="space-y-4 rounded-2xl border p-4 md:hidden">
+            <AgentIdentitySkeleton />
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-5 w-24 rounded-full" />
+            </div>
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-3 w-12" />
+              <Skeleton className="h-8 w-48 rounded-lg" />
+            </div>
+            <Skeleton className="h-8 w-full rounded-lg" />
+          </div>
         </div>
       </div>
     </SkeletonScreen>

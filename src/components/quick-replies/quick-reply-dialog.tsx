@@ -25,8 +25,9 @@ import type { QuickReply } from "@/lib/crm/types";
 export type QuickReplyValues = {
   shortcut: string;
   body: string;
-  when_to_use: string | null;
-  agent_permission: QuickReplyPermission;
+  /** Solo los manda un superadmin (la base rechaza el cambio de cualquier otro rol). */
+  when_to_use?: string | null;
+  agent_permission?: QuickReplyPermission;
 };
 
 const PERMISSION_HINTS: Record<QuickReplyPermission, string> = {
@@ -45,9 +46,11 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   reply: QuickReply | null;
   onSubmit: (values: QuickReplyValues) => Promise<boolean>;
+  /** Campos del asistente («Cuándo usarla», «Permiso del agente»): solo superadmin. */
+  showAgentFields: boolean;
 };
 
-export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit }: Props) {
+export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit, showAgentFields }: Props) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const [shortcut, setShortcut] = useState(reply?.shortcut ?? "");
   const [body, setBody] = useState(reply?.body ?? "");
@@ -77,8 +80,7 @@ export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit }: Props)
     const ok = await onSubmit({
       shortcut,
       body: body.trim(),
-      when_to_use: whenToUse.trim() || null,
-      agent_permission: permission,
+      ...(showAgentFields ? { when_to_use: whenToUse.trim() || null, agent_permission: permission } : {}),
     });
     setSaving(false);
     if (ok) onOpenChange(false);
@@ -153,35 +155,37 @@ export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit }: Props)
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="qr-when">Cuándo usarla</Label>
-              <Textarea
-                id="qr-when"
-                value={whenToUse}
-                onChange={(e) => setWhenToUse(e.target.value)}
-                rows={2}
-                maxLength={300}
-                placeholder="Cuando pregunten por el horario"
-              />
+          {showAgentFields && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="qr-when">Cuándo usarla</Label>
+                <Textarea
+                  id="qr-when"
+                  value={whenToUse}
+                  onChange={(e) => setWhenToUse(e.target.value)}
+                  rows={2}
+                  maxLength={300}
+                  placeholder="Cuando pregunten por el horario"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qr-permission">Permiso del agente</Label>
+                <Select value={permission} onValueChange={(v) => isQuickReplyPermission(v) && setPermission(v)}>
+                  <SelectTrigger id="qr-permission" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    {(Object.keys(QUICK_REPLY_PERMISSION_LABELS) as QuickReplyPermission[]).map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {QUICK_REPLY_PERMISSION_LABELS[p]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">{PERMISSION_HINTS[permission]}</p>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="qr-permission">Permiso del agente</Label>
-              <Select value={permission} onValueChange={(v) => isQuickReplyPermission(v) && setPermission(v)}>
-                <SelectTrigger id="qr-permission" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  {(Object.keys(QUICK_REPLY_PERMISSION_LABELS) as QuickReplyPermission[]).map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {QUICK_REPLY_PERMISSION_LABELS[p]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">{PERMISSION_HINTS[permission]}</p>
-            </div>
-          </div>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

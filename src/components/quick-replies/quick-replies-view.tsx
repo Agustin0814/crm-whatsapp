@@ -29,7 +29,7 @@ import { QuickReplyDialog, type QuickReplyValues } from "./quick-reply-dialog";
 
 export function QuickRepliesView() {
   const supabase = createClient();
-  const { isAdmin, me, profiles, loading: crmLoading } = useCrm();
+  const { isAdmin, isSuperadmin, me, profiles, loading: crmLoading } = useCrm();
   const [replies, setReplies] = useState<QuickReply[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<{ reply: QuickReply | null; key: number } | null>(null);
@@ -157,7 +157,7 @@ export function QuickRepliesView() {
                       )}
                     </div>
                     <p className="line-clamp-4 flex-1 text-sm whitespace-pre-wrap text-muted-foreground">{reply.body}</p>
-                    {reply.agent_permission !== "human_only" && isQuickReplyPermission(reply.agent_permission) && (
+                    {isSuperadmin && reply.agent_permission !== "human_only" && isQuickReplyPermission(reply.agent_permission) && (
                       <Badge variant="secondary" className="w-fit gap-1">
                         <BotIcon aria-hidden /> Asistente: {QUICK_REPLY_PERMISSION_LABELS[reply.agent_permission].toLowerCase()}
                       </Badge>
@@ -178,6 +178,7 @@ export function QuickRepliesView() {
           onOpenChange={(open) => !open && setEditing(null)}
           reply={editing.reply}
           onSubmit={save}
+          showAgentFields={isSuperadmin}
         />
       )}
 

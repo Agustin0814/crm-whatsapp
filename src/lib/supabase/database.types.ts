@@ -68,12 +68,19 @@ export type Database = {
         Row: {
           agent_id: string
           allowed_tools: string[]
+          business_info: string
           daily_cap_ceiling: number
+          delay_seconds_max: number
+          delay_seconds_min: number
+          escalation_topics: string[]
+          handoff_assign_to: string | null
+          handoff_message: string
           input_price_per_mtok: number
           kill_switch: boolean
           max_consecutive_ceiling: number
           max_output_tokens: number
           model: string
+          monthly_alert_threshold_pct: number
           monthly_token_cap: number
           output_price_per_mtok: number
           reasoning_effort: string
@@ -86,12 +93,19 @@ export type Database = {
         Insert: {
           agent_id: string
           allowed_tools?: string[]
+          business_info?: string
           daily_cap_ceiling?: number
+          delay_seconds_max?: number
+          delay_seconds_min?: number
+          escalation_topics?: string[]
+          handoff_assign_to?: string | null
+          handoff_message?: string
           input_price_per_mtok?: number
           kill_switch?: boolean
           max_consecutive_ceiling?: number
           max_output_tokens?: number
           model?: string
+          monthly_alert_threshold_pct?: number
           monthly_token_cap?: number
           output_price_per_mtok?: number
           reasoning_effort?: string
@@ -104,12 +118,19 @@ export type Database = {
         Update: {
           agent_id?: string
           allowed_tools?: string[]
+          business_info?: string
           daily_cap_ceiling?: number
+          delay_seconds_max?: number
+          delay_seconds_min?: number
+          escalation_topics?: string[]
+          handoff_assign_to?: string | null
+          handoff_message?: string
           input_price_per_mtok?: number
           kill_switch?: boolean
           max_consecutive_ceiling?: number
           max_output_tokens?: number
           model?: string
+          monthly_alert_threshold_pct?: number
           monthly_token_cap?: number
           output_price_per_mtok?: number
           reasoning_effort?: string
@@ -125,6 +146,13 @@ export type Database = {
             columns: ["agent_id"]
             isOneToOne: true
             referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_locked_config_handoff_assign_to_fkey"
+            columns: ["handoff_assign_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {

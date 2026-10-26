@@ -1,25 +1,26 @@
 "use client";
 
+import { LockIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { profileName, useCrm } from "@/components/crm/crm-provider";
+import { useCrm } from "@/components/crm/crm-provider";
 import { TagChip } from "@/components/crm/tag-chip";
+import { invalidateAgentNames } from "@/components/inbox/use-agent-names";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { saveAgentSettings, type Agent } from "@/lib/agents/client";
 import {
-  isQuickReplyPermission,
+  DELAY_PRESETS,
+  DISPLAY_NAME_MAX,
+  formatDelay,
   parseAgentConfig,
-  QUICK_REPLY_PERMISSION_LABELS,
   SCHEDULE_MODE_LABELS,
   type AgentConfig,
   type AgentLimits,
-  type QuickReplyPermission,
   type ScheduleMode,
 } from "@/lib/agents/config";
 import { errorMessage } from "@/lib/crm/contacts";
@@ -38,9 +39,7 @@ const DAYS = [
   { n: 7, label: "D", name: "domingo" },
 ];
 
-const NO_ASSIGNEE = "__nadie__";
-
-type ReplyDraft = Pick<QuickReply, "id" | "shortcut" | "body" | "when_to_use"> & { agent_permission: QuickReplyPermission };
+type ReplyRow = Pick<QuickReply, "id" | "shortcut" | "body" | "agent_permission">;
 
 type Props = {
   agent: Agent;
@@ -49,35 +48,31 @@ type Props = {
   onSaved: (agent: Agent) => void;
 };
 
-/** Capa editable por el cliente. La base recorta los valores al guardar. */
+/**
+ * Panel del CLIENTE: solo opciones cerradas (nada de texto para el modelo,
+ * modelos ni tokens). La base recorta y valida todo al guardar.
+ */
 export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
   const supabase = createClient();
-  const { profiles, tags } = useCrm();
+  const { tags } = useCrm();
   const [config, setConfig] = useState<AgentConfig>(() => parseAgentConfig(agent.config, limits));
-  const [topicsText, setTopicsText] = useState(() => parseAgentConfig(agent.config, limits).escalation.topics.join(", "));
-  const [replies, setReplies] = useState<ReplyDraft[] | null>(null);
-  const [originalReplies, setOriginalReplies] = useState<ReplyDraft[]>([]);
+  const [customDelay, setCustomDelay] = useState(() => {
+    const d = parseAgentConfig(agent.config, limits).delay_seconds;
+    return !DELAY_PRESETS.some((p) => p.seconds === d);
+  });
+  const [replies, setReplies] = useState<ReplyRow[] | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     supabase
       .from("quick_replies")
-      .select("id, shortcut, body, when_to_use, agent_permission")
+      .select("id, shortcut, body, agent_permission")
       .order("shortcut")
       .then(({ data, error }) => {
         if (cancelled) return;
-        if (error) {
-          toast.error("No se pudieron cargar las respuestas rápidas");
-          setReplies([]);
-          return;
-        }
-        const list = data.map((r) => ({
-          ...r,
-          agent_permission: isQuickReplyPermission(r.agent_permission) ? r.agent_permission : "human_only",
-        }));
-        setReplies(list);
-        setOriginalReplies(list);
+        if (error) toast.error("No se pudieron cargar las respuestas rápidas");
+        setReplies(data ?? []);
       });
     return () => {
       cancelled = true;
@@ -91,95 +86,95 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
     }));
   }
 
-  function patchReply(id: string, changes: Partial<ReplyDraft>) {
-    setReplies((prev) => prev?.map((r) => (r.id === id ? { ...r, ...changes } : r)) ?? prev);
+  /** Mensaje claro si algo no se puede guardar (el servidor vuelve a validar). */
+  function validate(): string | null {
+    if (!config.display_name.trim()) return "Escribe un nombre para el asistente.";
+    if (config.scope.classifications.length === 0) return "Elige al menos un tipo de contacto al que responda.";
+    if (config.schedule.mode !== "always") {
+      if (config.schedule.days.length === 0) return "Elige al menos un día del horario.";
+      if (config.schedule.start === config.schedule.end) return "La hora de inicio y la de fin no pueden ser iguales.";
+    }
+    if (config.delay_seconds < limits.delay_seconds_min || config.delay_seconds > limits.delay_seconds_max) {
+      return `La espera debe estar entre ${formatDelay(limits.delay_seconds_min)} y ${formatDelay(limits.delay_seconds_max)}.`;
+    }
+    return null;
   }
 
   async function save() {
+    const problem = validate();
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
     setSaving(true);
     try {
-      const topics = topicsText
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
       const saved = await saveAgentSettings(supabase, agent.key, {
-        config: { ...config, escalation: { ...config.escalation, topics } },
+        config: { ...config, display_name: config.display_name.trim() },
       });
-      // Solo las respuestas rápidas que cambiaron.
-      const changed = (replies ?? []).filter((r) => {
-        const o = originalReplies.find((x) => x.id === r.id);
-        return o && (o.agent_permission !== r.agent_permission || (o.when_to_use ?? "") !== (r.when_to_use ?? ""));
-      });
-      for (const r of changed) {
-        const { error } = await supabase
-          .from("quick_replies")
-          .update({ agent_permission: r.agent_permission, when_to_use: r.when_to_use?.trim() || null })
-          .eq("id", r.id);
-        if (error) throw error;
-      }
-      if (replies) setOriginalReplies(replies);
-      const parsed = parseAgentConfig(saved.config, limits);
-      setConfig(parsed);
-      setTopicsText(parsed.escalation.topics.join(", "));
+      setConfig(parseAgentConfig(saved.config, limits));
+      invalidateAgentNames();
       onSaved(saved);
-      toast.success("Configuración guardada");
+      toast.success("Cambios guardados");
     } catch (error) {
-      toast.error(errorMessage(error, "No se pudo guardar la configuración"));
+      toast.error(errorMessage(error, "No se pudieron guardar los cambios"));
     } finally {
       setSaving(false);
     }
   }
 
-  const instructionsLeft = limits.extra_instructions_max - config.extra_instructions.length;
+  const presetDisabled = (seconds: number) => seconds < limits.delay_seconds_min || seconds > limits.delay_seconds_max;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <fieldset disabled={!canEdit || saving} className="min-h-0 flex-1 overflow-y-auto">
-        <ConfigSection title="Información del negocio" description="Lo único que el asistente puede usar para responder." defaultOpen>
-          <Textarea
-            value={config.business_info}
-            onChange={(e) => patch("business_info", e.target.value)}
-            rows={8}
-            maxLength={limits.business_info_max}
-            placeholder="Qué hacen, productos y medidas, cobertura, horarios, ubicación, formas de pago…"
-            aria-label="Información del negocio"
-          />
-          <p className="text-right text-xs text-texto-suave">
-            {config.business_info.length} / {limits.business_info_max}
-          </p>
-        </ConfigSection>
-
-        <ConfigSection title="Tono" description="Cómo escribe el asistente.">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <ChoiceSelect
-              label="Estilo"
-              value={config.tone.style}
-              options={{ cercano: "Cercano", formal: "Formal" }}
-              onChange={(v) => patch("tone", { style: v })}
+        <ConfigSection title="Nombre" description="Así se identifica en el chat." defaultOpen>
+          <div className="space-y-1.5">
+            <Label htmlFor="ag-name">Nombre del asistente</Label>
+            <Input
+              id="ag-name"
+              value={config.display_name}
+              onChange={(e) => patch("display_name", e.target.value.slice(0, DISPLAY_NAME_MAX))}
+              maxLength={DISPLAY_NAME_MAX}
+              placeholder="Asistente"
             />
-            <ChoiceSelect
-              label="Trato"
-              value={config.tone.pronoun}
-              options={{ tu: "Tú", usted: "Usted" }}
-              onChange={(v) => patch("tone", { pronoun: v })}
-            />
-            <ChoiceSelect
-              label="Emojis"
-              value={config.tone.emojis}
-              options={{ ninguno: "Ninguno", pocos: "Pocos", libres: "Con moderación" }}
-              onChange={(v) => patch("tone", { emojis: v })}
-            />
-            <ChoiceSelect
-              label="Longitud"
-              value={config.tone.length}
-              options={{ corta: "Muy corta", media: "Breve" }}
-              onChange={(v) => patch("tone", { length: v })}
-            />
+            <p className="flex justify-between text-xs text-texto-suave">
+              <span>Aparece en la etiqueta de los mensajes que envía.</span>
+              <span className="tabular-nums">
+                {config.display_name.length}/{DISPLAY_NAME_MAX}
+              </span>
+            </p>
           </div>
         </ConfigSection>
 
-        <ConfigSection title="Cuándo actúa" description="Horario, retraso y a quién responde.">
-          <ChoiceSelect
+        <ConfigSection title="Tono" description="Cómo escribe.">
+          <Segmented
+            label="Trato"
+            value={config.tone.pronoun}
+            options={{ tu: "De tú", usted: "De usted" }}
+            onChange={(v) => patch("tone", { pronoun: v })}
+          />
+          <Segmented
+            label="Estilo"
+            value={config.tone.style}
+            options={{ cercano: "Cercano", formal: "Formal" }}
+            onChange={(v) => patch("tone", { style: v })}
+          />
+          <Segmented
+            label="Emojis"
+            value={config.tone.emojis}
+            options={{ ninguno: "Ninguno", pocos: "Pocos", libres: "Varios" }}
+            onChange={(v) => patch("tone", { emojis: v })}
+          />
+          <Segmented
+            label="Largo de las respuestas"
+            value={config.tone.length}
+            options={{ corta: "Cortas", media: "Medias" }}
+            onChange={(v) => patch("tone", { length: v })}
+          />
+        </ConfigSection>
+
+        <ConfigSection title="Cuándo responde" description="Horario y espera antes de contestar.">
+          <Segmented
             label="Horario"
             value={config.schedule.mode}
             options={SCHEDULE_MODE_LABELS}
@@ -189,7 +184,7 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
             <div className="space-y-3 rounded-xl border p-3">
               <p className="text-xs text-texto-suave">
                 {config.schedule.mode === "after_hours"
-                  ? "Horario de atención de tu equipo: el asistente responde FUERA de él."
+                  ? "Tu horario de atención: el asistente responde FUERA de él."
                   : "El asistente responde solo DENTRO de este horario."}{" "}
                 Hora de Hermosillo.
               </p>
@@ -230,41 +225,81 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
             </div>
           )}
 
-          <NumberField
-            id="ag-delay"
-            label="Retraso de respuesta (minutos)"
-            value={config.delay_minutes}
-            min={limits.delay_minutes_min}
-            max={limits.delay_minutes_max}
-            onChange={(v) => patch("delay_minutes", v)}
-            hint="Da tiempo a que una persona conteste primero. Con 0 responde al instante."
-          />
-
           <div className="space-y-2">
-            <Label>Responde a</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {CLASSIFICATIONS.map((c) => (
-                <label key={c} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={config.scope.classifications.includes(c)}
-                    onCheckedChange={(checked) =>
-                      patch("scope", {
-                        classifications: checked
-                          ? [...config.scope.classifications, c]
-                          : config.scope.classifications.filter((x) => x !== c),
-                      })
-                    }
-                  />
-                  {CLASSIFICATION_LABELS[c]}
-                </label>
-              ))}
+            <Label>Espera antes de responder</Label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {DELAY_PRESETS.map((p) => {
+                const active = !customDelay && config.delay_seconds === p.seconds;
+                return (
+                  <button
+                    key={p.seconds}
+                    type="button"
+                    aria-pressed={active}
+                    disabled={presetDisabled(p.seconds)}
+                    onClick={() => {
+                      setCustomDelay(false);
+                      patch("delay_seconds", p.seconds);
+                    }}
+                    className={cn(
+                      "rounded-xl border px-3 py-2 text-left text-sm disabled:opacity-50",
+                      active ? "border-marca bg-marca-suave text-marca-texto" : "hover:bg-superficie-2",
+                    )}
+                  >
+                    <span className="block font-medium">{p.label}</span>
+                    <span className="text-xs text-texto-suave">{p.hint}</span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                aria-pressed={customDelay}
+                onClick={() => setCustomDelay(true)}
+                className={cn(
+                  "rounded-xl border px-3 py-2 text-left text-sm",
+                  customDelay ? "border-marca bg-marca-suave text-marca-texto" : "hover:bg-superficie-2",
+                )}
+              >
+                <span className="block font-medium">Personalizada</span>
+                <span className="text-xs text-texto-suave">{customDelay ? formatDelay(config.delay_seconds) : "En segundos"}</span>
+              </button>
             </div>
+            {customDelay && (
+              <NumberField
+                id="ag-delay"
+                label="Segundos"
+                value={config.delay_seconds}
+                min={limits.delay_seconds_min}
+                max={limits.delay_seconds_max}
+                onChange={(v) => patch("delay_seconds", v)}
+              />
+            )}
+            <p className="text-xs text-texto-suave">
+              Si una persona de tu equipo responde o abre el chat durante la espera, el asistente no contesta.
+            </p>
           </div>
+        </ConfigSection>
 
+        <ConfigSection title="A quién le responde" description="Por tipo de contacto y etiquetas.">
+          <div className="grid grid-cols-2 gap-2">
+            {CLASSIFICATIONS.map((c) => (
+              <label key={c} className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={config.scope.classifications.includes(c)}
+                  onCheckedChange={(checked) =>
+                    patch("scope", {
+                      classifications: checked
+                        ? [...config.scope.classifications, c]
+                        : config.scope.classifications.filter((x) => x !== c),
+                    })
+                  }
+                />
+                {CLASSIFICATION_LABELS[c]}
+              </label>
+            ))}
+          </div>
           {tags.length > 0 && (
             <div className="space-y-2">
-              <Label>Etiquetas excluidas</Label>
-              <p className="text-xs text-texto-suave">Nunca responde a contactos con estas etiquetas.</p>
+              <Label>No responder a contactos con estas etiquetas</Label>
               <div className="flex flex-wrap gap-1.5">
                 {tags.map((tag) => {
                   const on = config.scope.excluded_tag_ids.includes(tag.id);
@@ -291,7 +326,7 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
           )}
         </ConfigSection>
 
-        <ConfigSection title="Límites" description="Topes por chat y por día.">
+        <ConfigSection title="Límites" description="Para que una persona tome el control a tiempo.">
           <NumberField
             id="ag-consecutive"
             label="Respuestas seguidas sin que intervenga una persona"
@@ -299,11 +334,11 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
             min={limits.max_consecutive_min}
             max={limits.max_consecutive_max}
             onChange={(v) => patch("limits", { max_consecutive: v })}
-            hint="Al llegar, transfiere a una persona y se pausa en ese chat."
+            hint="Al llegar, pasa el chat a una persona."
           />
           <NumberField
             id="ag-daily"
-            label="Tope diario de respuestas"
+            label="Respuestas máximas por día"
             value={config.limits.daily_cap}
             min={limits.daily_cap_min}
             max={limits.daily_cap_max}
@@ -311,50 +346,38 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
           />
         </ConfigSection>
 
-        <ConfigSection title="Respuestas rápidas que puede usar" description="Elige cuáles y cuándo.">
+        <ConfigSection title="Respuestas rápidas que puede usar" description="Enciende las que el asistente puede enviar.">
           {replies === null ? (
             <p className="text-sm text-texto-suave">Cargando…</p>
           ) : replies.length === 0 ? (
             <p className="text-sm text-texto-suave">Aún no hay respuestas rápidas. Créalas en Configuración → Respuestas rápidas.</p>
           ) : (
-            <ul className="space-y-3">
+            <ul className="divide-y rounded-xl border">
               {replies.map((r) => {
-                const allowed = r.agent_permission !== "human_only";
+                const teamOnly = r.agent_permission === "human_only";
+                const on = !teamOnly && config.quick_reply_ids.includes(r.id);
                 return (
-                  <li key={r.id} className="space-y-2 rounded-xl border p-3">
-                    <div className="flex items-center gap-2">
-                      <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-semibold">/{r.shortcut}</code>
-                      <Switch
-                        className="ml-auto"
-                        checked={allowed}
-                        onCheckedChange={(on) => patchReply(r.id, { agent_permission: on ? "approval" : "human_only" })}
-                        aria-label={`Permitir /${r.shortcut} al asistente`}
-                      />
+                  <li key={r.id} className={cn("flex items-center gap-3 px-3 py-2.5", teamOnly && "text-texto-suave")}>
+                    <div className="min-w-0 flex-1">
+                      <code className="text-sm font-semibold">/{r.shortcut}</code>
+                      <p className="truncate text-xs text-texto-suave">{r.body}</p>
                     </div>
-                    <p className="line-clamp-2 text-xs text-texto-suave">{r.body}</p>
-                    {allowed && (
-                      <div className="grid gap-2 sm:grid-cols-[1fr_11rem]">
-                        <Input
-                          value={r.when_to_use ?? ""}
-                          onChange={(e) => patchReply(r.id, { when_to_use: e.target.value })}
-                          maxLength={300}
-                          placeholder="Cuándo usarla"
-                          aria-label={`Cuándo usar /${r.shortcut}`}
-                        />
-                        <Select
-                          value={r.agent_permission}
-                          onValueChange={(v) => isQuickReplyPermission(v) && patchReply(r.id, { agent_permission: v })}
-                        >
-                          <SelectTrigger className="w-full" aria-label={`Permiso de /${r.shortcut}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent position="popper">
-                            <SelectItem value="automatic">{QUICK_REPLY_PERMISSION_LABELS.automatic}</SelectItem>
-                            <SelectItem value="approval">{QUICK_REPLY_PERMISSION_LABELS.approval}</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    {teamOnly && (
+                      <span className="flex shrink-0 items-center gap-1 text-xs">
+                        <LockIcon className="size-3.5" aria-hidden /> Solo tu equipo
+                      </span>
                     )}
+                    <Switch
+                      checked={on}
+                      disabled={teamOnly}
+                      onCheckedChange={(checked) =>
+                        patch(
+                          "quick_reply_ids",
+                          checked ? [...config.quick_reply_ids, r.id] : config.quick_reply_ids.filter((id) => id !== r.id),
+                        )
+                      }
+                      aria-label={teamOnly ? `/${r.shortcut}: solo tu equipo` : `Permitir /${r.shortcut} al asistente`}
+                    />
                   </li>
                 );
               })}
@@ -362,63 +385,12 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
           )}
         </ConfigSection>
 
-        <ConfigSection title="Escalamiento" description="Cuándo y a quién transfiere.">
-          <div className="space-y-1.5">
-            <Label htmlFor="ag-topics">Temas que siempre pasan a una persona</Label>
-            <Input id="ag-topics" value={topicsText} onChange={(e) => setTopicsText(e.target.value)} placeholder="queja, factura, garantía" />
-            <p className="text-xs text-texto-suave">Separados por comas. Se detectan sin acentos ni mayúsculas.</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ag-handoff">Mensaje de traspaso</Label>
-            <Textarea
-              id="ag-handoff"
-              value={config.escalation.handoff_message}
-              onChange={(e) => patch("escalation", { handoff_message: e.target.value })}
-              rows={2}
-              maxLength={500}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ag-assign">Asignar a</Label>
-            <Select
-              value={config.escalation.assign_to ?? NO_ASSIGNEE}
-              onValueChange={(v) => patch("escalation", { assign_to: v === NO_ASSIGNEE ? null : v })}
-            >
-              <SelectTrigger id="ag-assign" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper">
-                <SelectItem value={NO_ASSIGNEE}>Nadie (solo pausar)</SelectItem>
-                {profiles.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {profileName(p)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </ConfigSection>
-
-        <ConfigSection title="Instrucciones adicionales" description="Siempre por debajo de las reglas del proveedor.">
-          <Textarea
-            value={config.extra_instructions}
-            onChange={(e) => patch("extra_instructions", e.target.value)}
-            rows={5}
-            maxLength={limits.extra_instructions_max}
-            placeholder="Ej.: Si preguntan por envíos a otra ciudad, pide el código postal."
-            aria-label="Instrucciones adicionales"
-          />
-          <p className={cn("text-right text-xs", instructionsLeft < 50 ? "text-advertencia-texto" : "text-texto-suave")}>
-            {config.extra_instructions.length} / {limits.extra_instructions_max}
-          </p>
-        </ConfigSection>
-
-        <ConfigSection title="Alertas" description="Avisos para los administradores en esta página.">
+        <ConfigSection title="Avisos" description="Se muestran en esta página.">
           {(
             [
-              ["on_handoff", "Cuando transfiere a una persona"],
-              ["on_daily_cap", "Cuando llega al tope diario"],
-              ["on_error", "Cuando falla al generar respuestas"],
+              ["on_handoff", "Cuando pase un chat a una persona"],
+              ["on_daily_cap", "Cuando llegue al límite de respuestas del día"],
+              ["on_monthly_threshold", "Cuando se acerque al límite del mes"],
             ] as const
           ).map(([key, label]) => (
             <label key={key} className="flex items-center justify-between gap-3 text-sm">
@@ -432,7 +404,7 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
       {canEdit && (
         <div className="flex justify-end gap-2 border-t px-5 py-3">
           <Button onClick={() => void save()} disabled={saving}>
-            {saving ? "Guardando…" : "Guardar cambios"}
+            {saving ? "Guardando…" : "Guardar"}
           </Button>
         </div>
       )}
@@ -440,7 +412,8 @@ export function AgentConfigForm({ agent, limits, canEdit, onSaved }: Props) {
   );
 }
 
-function ChoiceSelect<T extends string>({
+/** Selector segmentado con etiqueta (opciones cerradas). */
+function Segmented<T extends string>({
   label,
   value,
   options,
@@ -451,22 +424,24 @@ function ChoiceSelect<T extends string>({
   options: Record<T, string>;
   onChange: (value: T) => void;
 }) {
-  const id = `ag-${label.toLowerCase().replace(/\s+/g, "-")}`;
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <Select value={value} onValueChange={(v) => onChange(v as T)}>
-        <SelectTrigger id={id} className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent position="popper">
-          {(Object.keys(options) as T[]).map((k) => (
-            <SelectItem key={k} value={k}>
-              {options[k]}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <p className="text-sm font-medium">{label}</p>
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        size="sm"
+        value={value}
+        onValueChange={(v) => v && onChange(v as T)}
+        aria-label={label}
+        className="flex-wrap"
+      >
+        {(Object.keys(options) as T[]).map((k) => (
+          <ToggleGroupItem key={k} value={k}>
+            {options[k]}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
     </div>
   );
 }

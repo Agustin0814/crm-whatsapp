@@ -9,22 +9,31 @@ import { PageHeader } from "@/components/crm/page-header";
 import { AgentsSkeleton } from "@/components/crm/section-skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
-  fetchAgent,
   fetchAgentLimits,
+  fetchAgents,
   fetchAlerts,
-  fetchUsageSummary,
+  fetchMonthlyUsage,
   markAlertsRead,
   saveAgentSettings,
   type Agent,
   type AgentAlert,
-  type AgentUsageSummary,
+  type MonthlyUsage,
 } from "@/lib/agents/client";
-import { AGENT_KEYS, AGENTS_DESCRIPTION, AGENT_MODE_LABELS, DEFAULT_LIMITS, type AgentLimits, type AgentMode } from "@/lib/agents/config";
+import {
+  AGENT_DESCRIPTIONS,
+  AGENT_MODE_LABELS,
+  DEFAULT_AGENT_DESCRIPTION,
+  DEFAULT_LIMITS,
+  type AgentLimits,
+  type AgentMode,
+} from "@/lib/agents/config";
 import { errorMessage } from "@/lib/crm/contacts";
 import { formatDateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
@@ -33,49 +42,56 @@ import { ActivityLog } from "./activity-log";
 import { AgentConfigForm } from "./agent-config-form";
 import { LockedConfigForm } from "./locked-config-form";
 
-const KEY = AGENT_KEYS.responder;
-
 const numberFmt = new Intl.NumberFormat("es-MX");
 const usdFmt = new Intl.NumberFormat("es-MX", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 
+const EMPTY_USAGE: MonthlyUsage = { replies: 0, tokens: 0, costUsd: 0 };
+
+function agentMode(agent: Agent): AgentMode {
+  return agent.mode === "automatic" ? "automatic" : "suggestion";
+}
+
 /**
- * Sección «Agentes»: tarjeta del Asistente de respuestas (encendido, modo,
- * estado y uso), panel lateral de configuración, alertas y registro de
- * actividad. Toda regla se vuelve a aplicar en el servidor.
+ * Sección «Agentes»: uso del mes de TODOS los agentes, alertas y la lista de
+ * agentes (encendido, modo y «Configurar»). La configuración y el registro de
+ * actividad se abren en paneles laterales. Toda regla se vuelve a aplicar en
+ * el servidor; aquí solo se piden cambios.
  */
 export function AgentsView() {
   const supabase = createClient();
   const { isAdmin, isSuperadmin, loading: crmLoading } = useCrm();
-  const [agent, setAgent] = useState<Agent | null>(null);
-  const [limits, setLimits] = useState<AgentLimits>(DEFAULT_LIMITS);
-  const [usage, setUsage] = useState<AgentUsageSummary | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [limitsById, setLimitsById] = useState<Record<string, AgentLimits>>({});
+  const [usage, setUsage] = useState<MonthlyUsage>(EMPTY_USAGE);
   const [alerts, setAlerts] = useState<AgentAlert[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busyIds, setBusyIds] = useState<string[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
+  // El agente del panel se conserva al cerrar para que la animación de salida no quede vacía.
+  const [configId, setConfigId] = useState<string | null>(null);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const a = await fetchAgent(supabase, KEY);
-    if (!a) throw new Error("Agente no encontrado");
-    const [l, u, al] = await Promise.all([
-      fetchAgentLimits(supabase, KEY),
-      fetchUsageSummary(supabase, KEY),
-      isAdmin ? fetchAlerts(supabase, a.id) : Promise.resolve([]),
+    const list = await fetchAgents(supabase);
+    const [limits, monthly, alertList] = await Promise.all([
+      Promise.all(list.map((a) => fetchAgentLimits(supabase, a.key).then((l) => [a.id, l] as const))),
+      isAdmin ? fetchMonthlyUsage(supabase) : Promise.resolve(EMPTY_USAGE),
+      isAdmin ? fetchAlerts(supabase) : Promise.resolve([]),
     ]);
-    return { a, l, u, al };
+    return { list, limits: Object.fromEntries(limits), monthly, alertList };
   }, [supabase, isAdmin]);
 
   useEffect(() => {
     if (crmLoading) return;
     let cancelled = false;
     load()
-      .then(({ a, l, u, al }) => {
+      .then(({ list, limits, monthly, alertList }) => {
         if (cancelled) return;
-        setAgent(a);
-        setLimits(l);
-        setUsage(u);
-        setAlerts(al);
+        setAgents(list);
+        setLimitsById(limits);
+        setUsage(monthly);
+        setAlerts(alertList);
         setStatus("ready");
       })
       .catch(() => {
@@ -86,19 +102,21 @@ export function AgentsView() {
     };
   }, [load, crmLoading, reloadKey]);
 
-  async function update(changes: { enabled?: boolean; mode?: AgentMode }) {
-    if (!agent) return;
-    const previous = agent;
-    setAgent({ ...agent, ...changes }); // optimista
-    setBusy(true);
+  function replaceAgent(saved: Agent) {
+    setAgents((prev) => prev.map((a) => (a.id === saved.id ? saved : a)));
+  }
+
+  async function update(agent: Agent, changes: { enabled?: boolean; mode?: AgentMode }) {
+    replaceAgent({ ...agent, ...changes }); // optimista
+    setBusyIds((prev) => [...prev, agent.id]);
     try {
-      setAgent(await saveAgentSettings(supabase, KEY, changes));
-      if (changes.enabled !== undefined) toast.success(changes.enabled ? "Asistente encendido" : "Asistente apagado");
+      replaceAgent(await saveAgentSettings(supabase, agent.key, changes));
+      if (changes.enabled !== undefined) toast.success(`${agent.name}: ${changes.enabled ? "activo" : "inactivo"}`);
     } catch (error) {
-      setAgent(previous);
-      toast.error(errorMessage(error, "No se pudo cambiar el asistente"));
+      replaceAgent(agent);
+      toast.error(errorMessage(error, "No se pudo cambiar el agente"));
     } finally {
-      setBusy(false);
+      setBusyIds((prev) => prev.filter((id) => id !== agent.id));
     }
   }
 
@@ -113,10 +131,26 @@ export function AgentsView() {
     }
   }
 
-  const header = <PageHeader title="Agentes" description={AGENTS_DESCRIPTION} />;
+  function openConfig(agent: Agent) {
+    setConfigId(agent.id);
+    setConfigOpen(true);
+  }
+
+  const header = (
+    <PageHeader
+      title="Agentes"
+      actions={
+        isAdmin && (
+          <Button variant="outline" onClick={() => setActivityOpen(true)} disabled={status !== "ready" || agents.length === 0}>
+            <Icon name="reloj" /> Registro de actividad
+          </Button>
+        )
+      }
+    />
+  );
 
   if (status === "loading") return <AgentsSkeleton />;
-  if (status === "error" || !agent) {
+  if (status === "error") {
     return (
       <div className="flex h-full min-h-0 flex-col">
         {header}
@@ -124,100 +158,53 @@ export function AgentsView() {
           <EmptyState
             tone="error"
             icon={BotIcon}
-            title="No se pudo cargar el asistente"
+            title="No se pudieron cargar los agentes"
             description="Revisa tu conexión e inténtalo de nuevo."
-            action={<Button onClick={() => { setStatus("loading"); setReloadKey((k) => k + 1); }}>Reintentar</Button>}
+            action={
+              <Button
+                onClick={() => {
+                  setStatus("loading");
+                  setReloadKey((k) => k + 1);
+                }}
+              >
+                Reintentar
+              </Button>
+            }
           />
         </div>
       </div>
     );
   }
 
-  const mode: AgentMode = agent.mode === "automatic" ? "automatic" : "suggestion";
   const unreadAlerts = alerts.filter((a) => !a.read_at);
-  const statusInfo = limits.kill_switch
-    ? { label: "Detenido por el proveedor", tone: "bg-error-suave text-error-texto" }
-    : agent.enabled
-      ? { label: `Activo · ${AGENT_MODE_LABELS[mode]}`, tone: "bg-exito-suave text-exito-texto" }
-      : { label: "Apagado", tone: "bg-superficie-3 text-texto-suave" };
-  const tokenCap = usage?.monthly_token_cap ?? limits.monthly_token_cap;
-  const tokenPct = tokenCap > 0 ? Math.min(100, Math.round(((usage?.month_tokens ?? 0) / tokenCap) * 100)) : 0;
+  const agentNames = new Map(agents.map((a) => [a.id, a.name]));
+  // Tope mensual total: suma de los topes de cada agente (capa bloqueada).
+  const tokenCap = agents.reduce((sum, a) => sum + (limitsById[a.id]?.monthly_token_cap ?? 0), 0);
+  const tokenPct = tokenCap > 0 ? Math.min(100, Math.round((usage.tokens / tokenCap) * 100)) : 0;
+  const configAgent = agents.find((a) => a.id === configId) ?? null;
+
+  const rowProps = (agent: Agent) => ({
+    agent,
+    limits: limitsById[agent.id] ?? DEFAULT_LIMITS,
+    canEdit: isAdmin,
+    busy: busyIds.includes(agent.id),
+    onUpdate: (changes: { enabled?: boolean; mode?: AgentMode }) => void update(agent, changes),
+    onConfigure: () => openConfig(agent),
+  });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {header}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-          {/* Tarjeta del agente */}
-          <section className="rounded-2xl border bg-card p-5" aria-labelledby="agent-title">
-            <div className="flex flex-wrap items-start gap-4">
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-marca-suave text-marca-texto">
-                <BotIcon className="size-6" aria-hidden />
-              </div>
-              <div className="min-w-0 flex-1 space-y-1">
-                <h2 id="agent-title" className="text-lg font-semibold">
-                  {agent.name}
-                </h2>
-                <p className="text-sm text-texto-suave">
-                  Responde mensajes de WhatsApp en el chat y puede usar tus respuestas rápidas.
-                </p>
-                <span className={cn("inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium", statusInfo.tone)}>{statusInfo.label}</span>
-              </div>
-              <label className="flex items-center gap-2 text-sm font-medium">
-                {agent.enabled ? "Encendido" : "Apagado"}
-                <Switch
-                  checked={agent.enabled}
-                  onCheckedChange={(on) => void update({ enabled: on })}
-                  disabled={!isAdmin || busy}
-                  aria-label="Encender o apagar el asistente"
-                />
-              </label>
-            </div>
-
-            <div className="mt-5 grid gap-4 border-t pt-5 sm:grid-cols-[auto_1fr_auto] sm:items-center">
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-texto-suave">Modo</p>
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  value={mode}
-                  onValueChange={(v) => v && void update({ mode: v as AgentMode })}
-                  disabled={!isAdmin || busy}
-                  aria-label="Modo del asistente"
-                >
-                  <ToggleGroupItem value="suggestion">{AGENT_MODE_LABELS.suggestion}</ToggleGroupItem>
-                  <ToggleGroupItem value="automatic">{AGENT_MODE_LABELS.automatic}</ToggleGroupItem>
-                </ToggleGroup>
-              </div>
-              <dl className="flex gap-6 sm:justify-center">
-                <div>
-                  <dt className="text-xs text-texto-suave">Respuestas hoy</dt>
-                  <dd className="text-xl font-semibold tabular-nums">{numberFmt.format(usage?.today_replies ?? 0)}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-texto-suave">Tokens hoy</dt>
-                  <dd className="text-xl font-semibold tabular-nums">{numberFmt.format(usage?.today_tokens ?? 0)}</dd>
-                </div>
-              </dl>
-              <Button variant="outline" onClick={() => setPanelOpen(true)}>
-                <Settings2Icon aria-hidden /> Configurar
-              </Button>
-            </div>
-            <p className="mt-3 text-xs text-texto-suave">
-              {mode === "suggestion"
-                ? "Sugerencia: el asistente escribe un borrador en el chat y una persona lo envía, edita o descarta."
-                : "Automático: el asistente envía la respuesta solo. Se pausa en un chat cuando una persona escribe o lo asigna."}
-            </p>
-          </section>
-
-          {/* Resumen del mes */}
+          {/* Uso del mes de todos los agentes */}
           {isAdmin && (
-            <section className="grid gap-3 sm:grid-cols-3" aria-label="Resumen del mes">
-              <Stat label="Respuestas del mes" value={numberFmt.format(usage?.month_replies ?? 0)} />
+            <section className="grid gap-3 sm:grid-cols-3" aria-label="Uso del mes">
+              <Stat label="Respuestas del mes" value={numberFmt.format(usage.replies)} />
               <div className="rounded-2xl border bg-card p-4">
                 <p className="text-xs text-texto-suave">Tokens del mes</p>
                 <p className="text-xl font-semibold tabular-nums">
-                  {numberFmt.format(usage?.month_tokens ?? 0)}
+                  {numberFmt.format(usage.tokens)}
                   <span className="text-sm font-normal text-texto-suave"> / {numberFmt.format(tokenCap)}</span>
                 </p>
                 <div
@@ -231,7 +218,7 @@ export function AgentsView() {
                   <div className={cn("h-full rounded-full", tokenPct >= 90 ? "bg-error" : "bg-marca")} style={{ width: `${tokenPct}%` }} />
                 </div>
               </div>
-              <Stat label="Costo estimado del mes" value={usdFmt.format(usage?.month_cost_usd ?? 0)} />
+              <Stat label="Costo estimado del mes" value={usdFmt.format(usage.costUsd)} />
             </section>
           )}
 
@@ -240,7 +227,7 @@ export function AgentsView() {
             <section className="rounded-2xl border border-advertencia/40 bg-advertencia-suave p-4 text-advertencia-texto" aria-label="Alertas">
               <div className="mb-2 flex items-center gap-2">
                 <BellIcon className="size-4" aria-hidden />
-                <h2 className="flex-1 text-sm font-semibold">Alertas del asistente</h2>
+                <h2 className="flex-1 text-sm font-semibold">Alertas de los agentes</h2>
                 <Button size="sm" variant="ghost" onClick={() => void dismissAlerts()}>
                   Marcar como leídas
                 </Button>
@@ -248,56 +235,216 @@ export function AgentsView() {
               <ul className="space-y-1 text-sm">
                 {unreadAlerts.slice(0, 5).map((a) => (
                   <li key={a.id}>
-                    <span className="text-xs opacity-80">{formatDateTime(a.created_at)}</span> · {a.message}
+                    <span className="text-xs opacity-80">{formatDateTime(a.created_at)}</span>
+                    {agents.length > 1 && <span className="font-medium"> · {agentNames.get(a.agent_id) ?? "Agente"}</span>} ·{" "}
+                    {a.message}
                   </li>
                 ))}
               </ul>
             </section>
           )}
 
-          {/* Registro de actividad */}
-          {isAdmin && <ActivityLog agentId={agent.id} refreshKey={reloadKey} />}
+          {/* Lista de agentes */}
+          {agents.length === 0 ? (
+            <EmptyState icon={BotIcon} title="Aún no hay agentes" description="Cuando el proveedor active un agente, aparecerá aquí." />
+          ) : (
+            <section aria-label="Agentes">
+              {/* ≥ 768 px: tabla */}
+              <div className="hidden rounded-2xl border bg-card md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="pl-4">Agente</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Modo</TableHead>
+                      <TableHead className="pr-4 text-right">
+                        <span className="sr-only">Acción</span>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {agents.map((agent) => {
+                      const p = rowProps(agent);
+                      return (
+                        <TableRow key={agent.id}>
+                          <TableCell className="py-3 pl-4 whitespace-normal">
+                            <AgentIdentity agent={agent} />
+                          </TableCell>
+                          <TableCell>
+                            <StatusControl {...p} />
+                          </TableCell>
+                          <TableCell>
+                            <ModeControl {...p} />
+                          </TableCell>
+                          <TableCell className="pr-4 text-right">
+                            <ConfigureButton {...p} />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* < 768 px: tarjetas apiladas con los mismos controles */}
+              <ul className="space-y-3 md:hidden">
+                {agents.map((agent) => {
+                  const p = rowProps(agent);
+                  return (
+                    <li key={agent.id} className="space-y-4 rounded-2xl border bg-card p-4">
+                      <AgentIdentity agent={agent} />
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs font-medium text-texto-suave">Estado</span>
+                        <StatusControl {...p} />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs font-medium text-texto-suave">Modo</span>
+                        <ModeControl {...p} />
+                      </div>
+                      <ConfigureButton {...p} className="w-full" />
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
         </div>
       </div>
 
-      <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
+      {/* Panel de configuración del agente elegido */}
+      <Sheet open={configOpen} onOpenChange={setConfigOpen}>
         <SheetContent side="right" className="w-full gap-0 sm:max-w-xl">
           <SheetHeader className="border-b px-5 py-4">
-            <SheetTitle className="text-lg">Configurar asistente</SheetTitle>
+            <SheetTitle className="text-lg">{configAgent ? `Configurar ${configAgent.name}` : "Configurar agente"}</SheetTitle>
             <SheetDescription>
               {isAdmin ? "Los límites se recortan a lo que permite tu plan." : "Solo un administrador puede cambiar la configuración."}
             </SheetDescription>
           </SheetHeader>
-          <Tabs defaultValue="config" className="flex min-h-0 flex-1 flex-col gap-0">
-            <TabsList variant="line" className="w-full justify-start border-b px-5">
-              <TabsTrigger value="config" className="flex-none">Configuración</TabsTrigger>
-              {isSuperadmin && <TabsTrigger value="locked" className="flex-none">Capa bloqueada</TabsTrigger>}
-              <TabsTrigger value="tester" className="flex-none" disabled>
-                <FlaskConicalIcon aria-hidden /> Probador
-                <Badge variant="secondary" className="ml-1">Pronto</Badge>
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="config" className="flex min-h-0 flex-1 flex-col">
-              <AgentConfigForm
-                key={agent.updated_at}
-                agent={agent}
-                limits={limits}
-                canEdit={isAdmin}
-                onSaved={(saved) => {
-                  setAgent(saved);
-                  setReloadKey((k) => k + 1);
-                }}
-              />
-            </TabsContent>
-            {isSuperadmin && (
-              <TabsContent value="locked" className="flex min-h-0 flex-1 flex-col">
-                <LockedConfigForm agentId={agent.id} onSaved={() => setReloadKey((k) => k + 1)} />
+          {configAgent && (
+            <Tabs key={configAgent.id} defaultValue="config" className="flex min-h-0 flex-1 flex-col gap-0">
+              <TabsList variant="line" className="w-full justify-start border-b px-5">
+                <TabsTrigger value="config" className="flex-none">
+                  Configuración
+                </TabsTrigger>
+                {isSuperadmin && (
+                  <TabsTrigger value="locked" className="flex-none">
+                    Proveedor
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="tester" className="flex-none" disabled>
+                  <FlaskConicalIcon aria-hidden /> Probador
+                  <Badge variant="secondary" className="ml-1">
+                    Próximamente
+                  </Badge>
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="config" className="flex min-h-0 flex-1 flex-col">
+                <AgentConfigForm
+                  key={configAgent.updated_at}
+                  agent={configAgent}
+                  limits={limitsById[configAgent.id] ?? DEFAULT_LIMITS}
+                  canEdit={isAdmin}
+                  onSaved={(saved) => {
+                    replaceAgent(saved);
+                    setReloadKey((k) => k + 1);
+                  }}
+                />
               </TabsContent>
-            )}
-          </Tabs>
+              {isSuperadmin && (
+                <TabsContent value="locked" className="flex min-h-0 flex-1 flex-col">
+                  <LockedConfigForm agentId={configAgent.id} onSaved={() => setReloadKey((k) => k + 1)} />
+                </TabsContent>
+              )}
+            </Tabs>
+          )}
         </SheetContent>
       </Sheet>
+
+      {/* Registro de actividad (todos los agentes) */}
+      {isAdmin && (
+        <Sheet open={activityOpen} onOpenChange={setActivityOpen}>
+          <SheetContent side="right" className="w-full gap-0 sm:max-w-3xl">
+            <SheetHeader className="border-b px-5 py-4">
+              <SheetTitle className="text-lg">Registro de actividad</SheetTitle>
+              <SheetDescription>Últimas respuestas, sugerencias y transferencias de los agentes.</SheetDescription>
+            </SheetHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {activityOpen && <ActivityLog agentIds={agents.map((a) => a.id)} agentNames={agentNames} refreshKey={reloadKey} />}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
+  );
+}
+
+// --- Piezas de la lista (tabla y tarjetas usan las mismas) ---------------------------
+
+type RowProps = {
+  agent: Agent;
+  limits: AgentLimits;
+  canEdit: boolean;
+  busy: boolean;
+  onUpdate: (changes: { enabled?: boolean; mode?: AgentMode }) => void;
+  onConfigure: () => void;
+};
+
+function AgentIdentity({ agent }: { agent: Agent }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-marca-suave text-marca-texto">
+        <BotIcon className="size-5" aria-hidden />
+      </div>
+      <div className="min-w-0">
+        <p className="font-medium">{agent.name}</p>
+        <p className="text-xs text-texto-suave">{AGENT_DESCRIPTIONS[agent.key] ?? DEFAULT_AGENT_DESCRIPTION}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Interruptor Activo / Inactivo; con kill switch, deshabilitado y con aviso. */
+function StatusControl({ agent, limits, canEdit, busy, onUpdate }: RowProps) {
+  const stopped = limits.kill_switch;
+  return (
+    <label className="flex items-center gap-2 text-sm font-medium">
+      <Switch
+        checked={agent.enabled && !stopped}
+        onCheckedChange={(on) => onUpdate({ enabled: on })}
+        disabled={!canEdit || busy || stopped}
+        aria-label={`Activar o desactivar ${agent.name}`}
+      />
+      {stopped ? (
+        <span className="rounded-full bg-error-suave px-2 py-0.5 text-xs text-error-texto">Detenido por el proveedor</span>
+      ) : (
+        <span className={agent.enabled ? "text-exito-texto" : "text-texto-suave"}>{agent.enabled ? "Activo" : "Inactivo"}</span>
+      )}
+    </label>
+  );
+}
+
+function ModeControl({ agent, canEdit, busy, onUpdate }: RowProps) {
+  return (
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      size="sm"
+      value={agentMode(agent)}
+      onValueChange={(v) => v && onUpdate({ mode: v as AgentMode })}
+      disabled={!canEdit || busy}
+      aria-label={`Modo de ${agent.name}`}
+    >
+      <ToggleGroupItem value="suggestion">{AGENT_MODE_LABELS.suggestion}</ToggleGroupItem>
+      <ToggleGroupItem value="automatic">{AGENT_MODE_LABELS.automatic}</ToggleGroupItem>
+    </ToggleGroup>
+  );
+}
+
+function ConfigureButton({ agent, onConfigure, className }: RowProps & { className?: string }) {
+  return (
+    <Button variant="outline" size="sm" onClick={onConfigure} className={className} aria-label={`Configurar ${agent.name}`}>
+      <Settings2Icon aria-hidden /> Configurar
+    </Button>
   );
 }
 

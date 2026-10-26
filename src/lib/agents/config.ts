@@ -1,13 +1,19 @@
-// Capa EDITABLE por el cliente de un agente (columna agents.config) y sus
-// límites. Se usa en la interfaz (formulario) y en el servidor (el motor
-// vuelve a recortar todo al leer). Aquí no hay secretos ni la capa bloqueada.
+// Capa del CLIENTE de un agente (columna agents.config) y sus límites. Se usa
+// en la interfaz (panel) y en el servidor (el motor vuelve a recortar todo al
+// leer). Aquí no hay secretos ni nada de la capa del proveedor.
 
 import type { Classification } from "@/lib/crm/types";
 
 export const AGENT_KEYS = { responder: "responder" } as const;
 
-/** Descripción del encabezado de /agentes (la comparte el esqueleto de carga). */
-export const AGENTS_DESCRIPTION = "Asistentes de IA que te ayudan a responder en el chat.";
+/**
+ * Descripción corta de cada agente en la lista de /agentes, por `agents.key`.
+ * Un agente nuevo sin entrada aquí usa la genérica.
+ */
+export const AGENT_DESCRIPTIONS: Record<string, string> = {
+  responder: "Responde mensajes de WhatsApp en el chat y puede usar tus respuestas rápidas.",
+};
+export const DEFAULT_AGENT_DESCRIPTION = "Asistente de IA del chat.";
 
 export type AgentMode = "suggestion" | "automatic";
 
@@ -20,8 +26,8 @@ export type ScheduleMode = "always" | "after_hours" | "custom";
 
 export const SCHEDULE_MODE_LABELS: Record<ScheduleMode, string> = {
   always: "Siempre",
-  after_hours: "Fuera de horario",
-  custom: "Horario personalizado",
+  after_hours: "Solo fuera de mi horario",
+  custom: "Personalizado",
 };
 
 export type QuickReplyPermission = "automatic" | "approval" | "human_only";
@@ -36,34 +42,44 @@ export function isQuickReplyPermission(value: string | null | undefined): value 
   return value === "automatic" || value === "approval" || value === "human_only";
 }
 
+/** Nombre por defecto del asistente (etiqueta de sus mensajes). */
+export const DEFAULT_DISPLAY_NAME = "Asistente";
+export const DISPLAY_NAME_MAX = 40;
+
+/**
+ * Capa del CLIENTE (agents.config). Sin texto libre para el modelo: el motor
+ * traduce cada opción a una instrucción fija escrita por el proveedor.
+ * Lo del proveedor (negocio, escalamiento, traspaso, modelo, techos) vive en
+ * agent_locked_config y nunca pasa por aquí.
+ */
 export type AgentConfig = {
-  business_info: string;
+  display_name: string;
   tone: {
     style: "formal" | "cercano";
     pronoun: "tu" | "usted";
+    /** «libres» se muestra como «Varios». */
     emojis: "ninguno" | "pocos" | "libres";
     length: "corta" | "media";
   };
   /** Días ISO (1 = lunes … 7 = domingo) y horas «HH:MM» en America/Hermosillo. */
   schedule: { mode: ScheduleMode; days: number[]; start: string; end: string };
-  delay_minutes: number;
+  /** Espera antes de responder, en segundos (rango del proveedor). */
+  delay_seconds: number;
   scope: { classifications: Classification[]; excluded_tag_ids: string[] };
   limits: { max_consecutive: number; daily_cap: number };
-  escalation: { topics: string[]; handoff_message: string; assign_to: string | null };
-  extra_instructions: string;
-  alerts: { on_handoff: boolean; on_daily_cap: boolean; on_error: boolean };
+  /** Respuestas rápidas que el cliente encendió (las nuevas nacen apagadas). */
+  quick_reply_ids: string[];
+  alerts: { on_handoff: boolean; on_daily_cap: boolean; on_monthly_threshold: boolean };
 };
 
-/** Rangos permitidos (los devuelve `agent_limits` desde la capa bloqueada). */
+/** Rangos permitidos (los devuelve `agent_limits` desde la capa del proveedor). */
 export type AgentLimits = {
   max_consecutive_min: number;
   max_consecutive_max: number;
   daily_cap_min: number;
   daily_cap_max: number;
-  delay_minutes_min: number;
-  delay_minutes_max: number;
-  extra_instructions_max: number;
-  business_info_max: number;
+  delay_seconds_min: number;
+  delay_seconds_max: number;
   monthly_token_cap: number;
   kill_switch: boolean;
 };
@@ -73,26 +89,28 @@ export const DEFAULT_LIMITS: AgentLimits = {
   max_consecutive_max: 10,
   daily_cap_min: 1,
   daily_cap_max: 200,
-  delay_minutes_min: 0,
-  delay_minutes_max: 10,
-  extra_instructions_max: 1000,
-  business_info_max: 4000,
+  delay_seconds_min: 5,
+  delay_seconds_max: 600,
   monthly_token_cap: 0,
   kill_switch: false,
 };
 
-export const DEFAULT_HANDOFF_MESSAGE = "Gracias por tu paciencia. Te comunico con un asesor que te atenderá en breve.";
+/** Presets de espera del panel (segundos). */
+export const DELAY_PRESETS = [
+  { seconds: 15, label: "Rápido", hint: "15 s" },
+  { seconds: 30, label: "Normal", hint: "30 s" },
+  { seconds: 120, label: "Pausado", hint: "2 min" },
+] as const;
 
 export const DEFAULT_CONFIG: AgentConfig = {
-  business_info: "",
+  display_name: DEFAULT_DISPLAY_NAME,
   tone: { style: "cercano", pronoun: "tu", emojis: "pocos", length: "corta" },
   schedule: { mode: "always", days: [1, 2, 3, 4, 5, 6], start: "09:00", end: "18:00" },
-  delay_minutes: 2,
+  delay_seconds: 30,
   scope: { classifications: ["unclassified", "prospect"], excluded_tag_ids: [] },
   limits: { max_consecutive: 5, daily_cap: 100 },
-  escalation: { topics: [], handoff_message: DEFAULT_HANDOFF_MESSAGE, assign_to: null },
-  extra_instructions: "",
-  alerts: { on_handoff: true, on_daily_cap: true, on_error: true },
+  quick_reply_ids: [],
+  alerts: { on_handoff: true, on_daily_cap: true, on_monthly_threshold: true },
 };
 
 const CLASSIFICATION_VALUES: Classification[] = ["unclassified", "prospect", "customer", "supplier"];
@@ -104,16 +122,16 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   return Math.min(Math.max(Math.round(n), min), max);
 }
 
-function str(value: unknown, max: number, fallback = ""): string {
-  return typeof value === "string" ? value.slice(0, max) : fallback;
-}
-
 function pick<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
   return options.includes(value as T) ? (value as T) : fallback;
 }
 
 function obj(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.filter((v): v is string => typeof v === "string" && v !== ""))] : [];
 }
 
 /**
@@ -126,7 +144,6 @@ export function parseAgentConfig(raw: unknown, limits: AgentLimits = DEFAULT_LIM
   const schedule = obj(c.schedule);
   const scope = obj(c.scope);
   const lim = obj(c.limits);
-  const esc = obj(c.escalation);
   const alerts = obj(c.alerts);
   const d = DEFAULT_CONFIG;
 
@@ -136,9 +153,10 @@ export function parseAgentConfig(raw: unknown, limits: AgentLimits = DEFAULT_LIM
   const classifications = Array.isArray(scope.classifications)
     ? scope.classifications.filter((v): v is Classification => CLASSIFICATION_VALUES.includes(v as Classification))
     : d.scope.classifications;
+  const name = typeof c.display_name === "string" ? c.display_name.trim().slice(0, DISPLAY_NAME_MAX) : "";
 
   return {
-    business_info: str(c.business_info, limits.business_info_max),
+    display_name: name || DEFAULT_DISPLAY_NAME,
     tone: {
       style: pick(tone.style, ["formal", "cercano"], d.tone.style),
       pronoun: pick(tone.pronoun, ["tu", "usted"], d.tone.pronoun),
@@ -151,31 +169,38 @@ export function parseAgentConfig(raw: unknown, limits: AgentLimits = DEFAULT_LIM
       start: typeof schedule.start === "string" && TIME_RE.test(schedule.start) ? schedule.start : d.schedule.start,
       end: typeof schedule.end === "string" && TIME_RE.test(schedule.end) ? schedule.end : d.schedule.end,
     },
-    delay_minutes: clampInt(c.delay_minutes, limits.delay_minutes_min, limits.delay_minutes_max, d.delay_minutes),
-    scope: {
-      classifications,
-      excluded_tag_ids: Array.isArray(scope.excluded_tag_ids)
-        ? scope.excluded_tag_ids.filter((v): v is string => typeof v === "string")
-        : [],
-    },
+    delay_seconds: clampInt(c.delay_seconds, limits.delay_seconds_min, limits.delay_seconds_max, d.delay_seconds),
+    scope: { classifications, excluded_tag_ids: strings(scope.excluded_tag_ids) },
     limits: {
       max_consecutive: clampInt(lim.max_consecutive, limits.max_consecutive_min, limits.max_consecutive_max, d.limits.max_consecutive),
       daily_cap: clampInt(lim.daily_cap, limits.daily_cap_min, limits.daily_cap_max, d.limits.daily_cap),
     },
-    escalation: {
-      topics: Array.isArray(esc.topics)
-        ? esc.topics.filter((v): v is string => typeof v === "string" && v.trim() !== "").map((v) => v.trim().slice(0, 80)).slice(0, 30)
-        : [],
-      handoff_message: str(esc.handoff_message, 500).trim() || DEFAULT_HANDOFF_MESSAGE,
-      assign_to: typeof esc.assign_to === "string" && esc.assign_to ? esc.assign_to : null,
-    },
-    extra_instructions: str(c.extra_instructions, limits.extra_instructions_max),
+    quick_reply_ids: strings(c.quick_reply_ids),
     alerts: {
       on_handoff: alerts.on_handoff !== false,
       on_daily_cap: alerts.on_daily_cap !== false,
-      on_error: alerts.on_error !== false,
+      on_monthly_threshold: alerts.on_monthly_threshold !== false,
     },
   };
+}
+
+/**
+ * Regla efectiva de una respuesta rápida para el asistente: el proveedor NO la
+ * marcó como solo humano Y el cliente la encendió. La usan el motor y el panel.
+ */
+export function isQuickReplyUsable(
+  reply: { id: string; agent_permission: string | null },
+  config: Pick<AgentConfig, "quick_reply_ids">,
+): boolean {
+  return reply.agent_permission !== "human_only" && config.quick_reply_ids.includes(reply.id);
+}
+
+/** Espera legible: «15 s», «2 min», «1 min 30 s». */
+export function formatDelay(seconds: number): string {
+  if (seconds < 60) return `${seconds} s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s ? `${m} min ${s} s` : `${m} min`;
 }
 
 /** Motivos de pausa legibles (conversations.agent_paused_reason). */

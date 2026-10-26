@@ -11,6 +11,7 @@ import { isMediaKind } from "@/lib/media/rules";
 import { cn } from "@/lib/utils";
 import { MediaMessage } from "./media/media-message";
 import { MessageStatus } from "./message-status";
+import { useAgentNames } from "./use-agent-names";
 
 /** Nombre legible de los tipos que el CRM todavía no muestra. */
 const UNSUPPORTED_LABELS: Record<string, string> = {
@@ -34,6 +35,7 @@ type Props = {
  * y el avatar del contacto solo aparece en el primero del grupo.
  */
 export function MessageList({ messages, contact, loading, now }: Props) {
+  const agentName = useAgentNames();
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const lastIdRef = useRef<string | null>(null);
@@ -91,7 +93,13 @@ export function MessageList({ messages, contact, loading, now }: Props) {
                     </span>
                   </li>
                 )}
-                <MessageBubble message={message} time={time} firstOfGroup={firstOfGroup} contact={contact} />
+                <MessageBubble
+                  message={message}
+                  time={time}
+                  firstOfGroup={firstOfGroup}
+                  contact={contact}
+                  agentName={message.sent_by_agent ? agentName(message.agent_id) : null}
+                />
               </Fragment>
             );
           })}
@@ -106,11 +114,14 @@ function MessageBubble({
   time,
   firstOfGroup,
   contact,
+  agentName,
 }: {
   message: Message;
   time: string;
   firstOfGroup: boolean;
   contact: ContactWithTags | null;
+  /** Nombre del asistente si el mensaje lo envió un agente. */
+  agentName: string | null;
 }) {
   const outbound = message.direction === "outbound";
   const media = isMediaKind(message.type);
@@ -128,9 +139,9 @@ function MessageBubble({
             : "mt-1 text-texto-suave",
       )}
     >
-      {message.sent_by_agent && (
-        <span className="mr-1 flex items-center gap-0.5 font-medium">
-          <BotIcon className="size-3" aria-hidden /> Asistente
+      {agentName && (
+        <span className="mr-1 flex max-w-40 items-center gap-0.5 truncate font-medium">
+          <BotIcon className="size-3 shrink-0" aria-hidden /> {agentName}
         </span>
       )}
       <time dateTime={time}>{formatTime(time)}</time>

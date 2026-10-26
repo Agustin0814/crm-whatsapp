@@ -4,7 +4,7 @@ import { applyTemplate } from "@/lib/crm/templates";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import type { Tables } from "@/lib/supabase/database.types";
 import { WhatsAppApiError } from "@/lib/whatsapp/send";
-import { parseAgentConfig, type AgentConfig, type AgentLimits, DEFAULT_LIMITS } from "./config";
+import { DEFAULT_LIMITS, isQuickReplyUsable, parseAgentConfig, type AgentConfig, type AgentLimits } from "./config";
 import {
   AGENT_TIME_ZONE,
   estimateCostUsd,
@@ -66,7 +66,7 @@ export async function scheduleAgentsForInbound(
   try {
     const { data: agents, error } = await supabase
       .from("agents")
-      .select("id, config, agent_locked_config(kill_switch)")
+      .select("id, config, agent_locked_config(kill_switch, delay_seconds_min, delay_seconds_max)")
       .eq("enabled", true);
     if (error || !agents?.length) return false;
 
@@ -79,9 +79,15 @@ export async function scheduleAgentsForInbound(
 
     let immediate = false;
     for (const agent of agents) {
-      if (agent.agent_locked_config?.kill_switch) continue;
-      const config = parseAgentConfig(agent.config);
-      const runAt = new Date(Date.now() + config.delay_minutes * 60_000).toISOString();
+      const locked = agent.agent_locked_config;
+      if (!locked || locked.kill_switch) continue;
+      // La espera (segundos) se recorta otra vez al rango del proveedor.
+      const config = parseAgentConfig(agent.config, {
+        ...DEFAULT_LIMITS,
+        delay_seconds_min: locked.delay_seconds_min,
+        delay_seconds_max: locked.delay_seconds_max,
+      });
+      const runAt = new Date(Date.now() + config.delay_seconds * 1000).toISOString();
       const { error: scheduleError } = await supabase.rpc("schedule_agent_run", {
         p_agent_id: agent.id,
         p_conversation_id: input.conversationId,
@@ -92,7 +98,7 @@ export async function scheduleAgentsForInbound(
         console.error(`[agents] No se pudo programar la respuesta: ${scheduleError.message}`);
         continue;
       }
-      if (config.delay_minutes === 0) immediate = true;
+      if (config.delay_seconds === 0) immediate = true;
     }
     return immediate;
   } catch (error) {
@@ -177,6 +183,8 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     ...DEFAULT_LIMITS,
     max_consecutive_max: locked.max_consecutive_ceiling,
     daily_cap_max: locked.daily_cap_ceiling,
+    delay_seconds_min: locked.delay_seconds_min,
+    delay_seconds_max: locked.delay_seconds_max,
   };
   const config = parseAgentConfig(agent.config, limits);
   const mode = agent.mode === "automatic" ? "automatic" : "suggestion";
@@ -265,18 +273,34 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     await alertOnce(supabase, agent.id, "token_cap", "superadmin", periods.month, `Se alcanzó el tope mensual de ${locked.monthly_token_cap.toLocaleString("es-MX")} tokens. El asistente se detuvo hasta el próximo mes.`);
     return block(supabase, run, "Tope mensual de tokens");
   }
+  // Aviso al cliente al acercarse al límite del mes (umbral del proveedor).
+  if (
+    config.alerts.on_monthly_threshold &&
+    locked.monthly_token_cap > 0 &&
+    monthTokens >= (locked.monthly_token_cap * locked.monthly_alert_threshold_pct) / 100
+  ) {
+    await alertOnce(
+      supabase,
+      agent.id,
+      "monthly_threshold",
+      "admin",
+      periods.month,
+      `${config.display_name} ya usó el ${locked.monthly_alert_threshold_pct} % de su límite del mes.`,
+    );
+  }
 
   // --- Temas de escalamiento (sin gastar tokens) ---
-  const topic = trigger?.body ? matchEscalationTopic(trigger.body, config.escalation.topics) : null;
+  const topic = trigger?.body ? matchEscalationTopic(trigger.body, locked.escalation_topics) : null;
   if (topic) return handoff(ctx, `Tema de escalamiento: ${topic}`, NO_USAGE);
 
   // --- Respuestas rápidas permitidas e historial ---
+  // Regla efectiva: el proveedor no la marcó «solo humano» Y el cliente la encendió.
   const { data: quickReplies } = await supabase
     .from("quick_replies")
     .select("id, shortcut, body, when_to_use, agent_permission")
     .neq("agent_permission", "human_only")
     .order("shortcut");
-  const allowedReplies = quickReplies ?? [];
+  const allowedReplies = (quickReplies ?? []).filter((q) => isQuickReplyUsable(q, config));
 
   const { data: recent } = await supabase
     .from("messages")
@@ -291,6 +315,8 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
   const system = buildSystemPrompt({
     lockedSystemPrompt: locked.system_prompt,
     lockedSafetyRules: locked.safety_rules,
+    businessInfo: locked.business_info,
+    escalationTopics: locked.escalation_topics,
     config,
     quickReplies: allowedReplies,
     contactFirstName: contact.name?.trim().split(/\s+/)[0] || null,
@@ -317,9 +343,8 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     const usage = error instanceof ModelProviderError ? error.usage : NO_USAGE;
     const reason = error instanceof ModelProviderError ? error.message : "Error del modelo";
     await logUsage(supabase, { run, outcome: "error", reason, usage, model: locked.model, locked });
-    if (config.alerts.on_error) {
-      await alertOnce(supabase, agent.id, "error", "admin", periods.day, "El asistente tuvo errores al generar respuestas hoy. Revisa el registro de actividad.");
-    }
+    // Los errores técnicos solo los ve el proveedor.
+    await alertOnce(supabase, agent.id, "error", "superadmin", periods.day, "El asistente tuvo errores al generar respuestas hoy. Revisa el registro de actividad.");
     return { acted: true, reason };
   }
 
@@ -431,8 +456,8 @@ async function deliver(
 }
 
 /**
- * Transfiere a una persona: entrega el mensaje de traspaso configurado,
- * pausa el agente en el chat, asigna (si está configurado) y avisa.
+ * Transfiere a una persona: entrega el mensaje de traspaso del proveedor,
+ * pausa el agente en el chat, asigna (si el proveedor lo configuró) y avisa.
  */
 async function handoff(
   ctx: RunContext,
@@ -441,9 +466,9 @@ async function handoff(
   pauseReason: "handoff" | "limit_consecutive" = "handoff",
   model?: string,
 ): Promise<RunResult> {
-  const { supabase, config } = ctx;
+  const { supabase, config, locked } = ctx;
   const result = await deliver(ctx, {
-    text: config.escalation.handoff_message,
+    text: locked.handoff_message,
     quickReplyId: null,
     forceSuggestion: false,
     usage,
@@ -458,7 +483,7 @@ async function handoff(
     .update({
       agent_paused: true,
       agent_paused_reason: pauseReason,
-      ...(config.escalation.assign_to ? { assigned_to: config.escalation.assign_to } : {}),
+      ...(locked.handoff_assign_to ? { assigned_to: locked.handoff_assign_to } : {}),
     })
     .eq("id", ctx.conversation.id);
 
@@ -469,7 +494,7 @@ async function handoff(
       conversation_id: ctx.conversation.id,
       kind: "handoff",
       audience: "admin",
-      message: `El asistente transfirió la conversación con ${name}: ${reason}`,
+      message: `${config.display_name} pasó a una persona la conversación con ${name}: ${reason}`,
     });
   }
   return { ...result, reason };
@@ -522,7 +547,7 @@ async function logUsage(
 async function alertOnce(
   supabase: AdminClient,
   agentId: string,
-  kind: "daily_cap" | "token_cap" | "error",
+  kind: "daily_cap" | "token_cap" | "monthly_threshold" | "error",
   audience: "admin" | "superadmin",
   since: string,
   message: string,

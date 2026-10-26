@@ -24,15 +24,27 @@ const OUTCOME_TONES: Record<string, string> = {
 const numberFmt = new Intl.NumberFormat("es-MX");
 const usdFmt = new Intl.NumberFormat("es-MX", { style: "currency", currency: "USD", maximumFractionDigits: 4 });
 
-/** Registro de lo que hizo el agente (solo admin; la RLS lo limita). */
-export function ActivityLog({ agentId, refreshKey }: { agentId: string; refreshKey: number }) {
+type Props = {
+  agentIds: string[];
+  /** Nombre de cada agente: con más de uno se muestra la columna «Agente». */
+  agentNames: Map<string, string>;
+  refreshKey: number;
+};
+
+/**
+ * Registro de lo que hicieron los agentes (solo admin; la RLS lo limita).
+ * Se muestra dentro del panel lateral «Registro de actividad».
+ */
+export function ActivityLog({ agentIds, agentNames, refreshKey }: Props) {
   const supabase = createClient();
   const [rows, setRows] = useState<AgentUsageRow[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const idsKey = agentIds.join(",");
+  const showAgent = agentIds.length > 1;
 
   useEffect(() => {
     let cancelled = false;
-    fetchActivity(supabase, agentId)
+    fetchActivity(supabase, idsKey ? idsKey.split(",") : [])
       .then((data) => {
         if (!cancelled) setRows(data);
       })
@@ -42,17 +54,14 @@ export function ActivityLog({ agentId, refreshKey }: { agentId: string; refreshK
     return () => {
       cancelled = true;
     };
-  }, [supabase, agentId, refreshKey]);
+  }, [supabase, idsKey, refreshKey]);
 
   return (
-    <section className="rounded-2xl border bg-card" aria-labelledby="activity-title">
-      <h2 id="activity-title" className="border-b px-4 py-3 font-semibold">
-        Registro de actividad
-      </h2>
+    <div>
       {failed ? (
-        <p className="px-4 py-6 text-sm text-error-texto">No se pudo cargar el registro.</p>
+        <p className="px-5 py-6 text-sm text-error-texto">No se pudo cargar el registro.</p>
       ) : rows === null ? (
-        <div className="space-y-2 p-4">
+        <div className="space-y-2 p-5">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-8 w-full" />
           ))}
@@ -63,12 +72,13 @@ export function ActivityLog({ agentId, refreshKey }: { agentId: string; refreshK
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Fecha</TableHead>
+              <TableHead className="pl-5">Fecha</TableHead>
+              {showAgent && <TableHead>Agente</TableHead>}
               <TableHead>Contacto</TableHead>
               <TableHead>Resultado</TableHead>
               <TableHead className="hidden md:table-cell">Motivo</TableHead>
               <TableHead className="hidden text-right sm:table-cell">Tokens</TableHead>
-              <TableHead className="hidden text-right lg:table-cell">Costo est.</TableHead>
+              <TableHead className="hidden pr-5 text-right lg:table-cell">Costo est.</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -77,7 +87,8 @@ export function ActivityLog({ agentId, refreshKey }: { agentId: string; refreshK
               const name = contact?.name?.trim() || (contact ? formatPhone(contact.wa_id ?? contact.phone) : "—");
               return (
                 <TableRow key={row.id}>
-                  <TableCell className="text-xs whitespace-nowrap text-texto-suave">{formatDateTime(row.created_at)}</TableCell>
+                  <TableCell className="pl-5 text-xs whitespace-nowrap text-texto-suave">{formatDateTime(row.created_at)}</TableCell>
+                  {showAgent && <TableCell className="whitespace-nowrap">{agentNames.get(row.agent_id) ?? "—"}</TableCell>}
                   <TableCell className="max-w-40 truncate">
                     {row.conversation ? (
                       <Link href={`/?c=${row.conversation.id}`} className="hover:underline">
@@ -98,13 +109,13 @@ export function ActivityLog({ agentId, refreshKey }: { agentId: string; refreshK
                   <TableCell className="hidden text-right tabular-nums sm:table-cell">
                     {numberFmt.format(row.input_tokens + row.output_tokens)}
                   </TableCell>
-                  <TableCell className="hidden text-right tabular-nums lg:table-cell">{usdFmt.format(Number(row.est_cost_usd))}</TableCell>
+                  <TableCell className="hidden pr-5 text-right tabular-nums lg:table-cell">{usdFmt.format(Number(row.est_cost_usd))}</TableCell>
                 </TableRow>
               );
             })}
           </TableBody>
         </Table>
       )}
-    </section>
+    </div>
   );
 }

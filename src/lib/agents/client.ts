@@ -16,13 +16,11 @@ export type AgentUsageRow = Tables<"agent_usage_log"> & {
   conversation: { id: string; contacts: { name: string | null; wa_id: string | null; phone: string | null } | null } | null;
 };
 
-export type AgentUsageSummary = {
-  today_replies: number;
-  today_tokens: number;
-  month_replies: number;
-  month_tokens: number;
-  month_cost_usd: number;
-  monthly_token_cap: number;
+/** Uso del mes actual sumado entre TODOS los agentes. */
+export type MonthlyUsage = {
+  replies: number;
+  tokens: number;
+  costUsd: number;
 };
 
 export async function fetchAgent(supabase: Client, key: string): Promise<Agent | null> {
@@ -31,26 +29,43 @@ export async function fetchAgent(supabase: Client, key: string): Promise<Agent |
   return data;
 }
 
+/** Todos los agentes (la lista de /agentes no asume uno solo). */
+export async function fetchAgents(supabase: Client): Promise<Agent[]> {
+  const { data, error } = await supabase.from("agents").select("*").order("name");
+  if (error) throw error;
+  return data;
+}
+
+/** Primer día del mes actual en America/Hermosillo (UTC−7 fijo), «AAAA-MM-01». */
+function currentMonthDate(now: Date = new Date()): string {
+  const local = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Hermosillo" }).format(now);
+  return `${local.slice(0, 7)}-01`;
+}
+
+/**
+ * Uso del mes de todos los agentes, agregando la vista agent_usage_monthly
+ * (una fila por agente y mes). La RLS solo devuelve datos a admin.
+ */
+export async function fetchMonthlyUsage(supabase: Client): Promise<MonthlyUsage> {
+  const { data, error } = await supabase
+    .from("agent_usage_monthly")
+    .select("replies, input_tokens, output_tokens, est_cost_usd")
+    .eq("month", currentMonthDate());
+  if (error) throw error;
+  return (data ?? []).reduce<MonthlyUsage>(
+    (acc, row) => ({
+      replies: acc.replies + (Number(row.replies) || 0),
+      tokens: acc.tokens + (Number(row.input_tokens) || 0) + (Number(row.output_tokens) || 0),
+      costUsd: acc.costUsd + (Number(row.est_cost_usd) || 0),
+    }),
+    { replies: 0, tokens: 0, costUsd: 0 },
+  );
+}
+
 export async function fetchAgentLimits(supabase: Client, key: string): Promise<AgentLimits> {
   const { data, error } = await supabase.rpc("agent_limits", { p_key: key });
   if (error) throw error;
   return { ...DEFAULT_LIMITS, ...((data as Partial<AgentLimits> | null) ?? {}) };
-}
-
-export async function fetchUsageSummary(supabase: Client, key: string): Promise<AgentUsageSummary | null> {
-  const { data, error } = await supabase.rpc("agent_usage_summary", { p_key: key });
-  if (error) throw error;
-  if (!data) return null;
-  const d = data as Record<string, unknown>;
-  const n = (v: unknown) => Number(v ?? 0) || 0;
-  return {
-    today_replies: n(d.today_replies),
-    today_tokens: n(d.today_tokens),
-    month_replies: n(d.month_replies),
-    month_tokens: n(d.month_tokens),
-    month_cost_usd: n(d.month_cost_usd),
-    monthly_token_cap: n(d.monthly_token_cap),
-  };
 }
 
 /** Guarda la capa editable (la base recorta los valores a los límites). */
@@ -70,22 +85,24 @@ export async function saveAgentSettings(
   return data as Agent;
 }
 
-export async function fetchActivity(supabase: Client, agentId: string, limit = 50): Promise<AgentUsageRow[]> {
+/** Últimas acciones de los agentes indicados (todos los de la página). */
+export async function fetchActivity(supabase: Client, agentIds: string[], limit = 50): Promise<AgentUsageRow[]> {
+  if (!agentIds.length) return [];
   const { data, error } = await supabase
     .from("agent_usage_log")
     .select("*, conversation:conversations(id, contacts(name, wa_id, phone))")
-    .eq("agent_id", agentId)
+    .in("agent_id", agentIds)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
   return data as AgentUsageRow[];
 }
 
-export async function fetchAlerts(supabase: Client, agentId: string, limit = 20): Promise<AgentAlert[]> {
+/** Alertas de todos los agentes (la RLS filtra por audiencia). */
+export async function fetchAlerts(supabase: Client, limit = 20): Promise<AgentAlert[]> {
   const { data, error } = await supabase
     .from("agent_alerts")
     .select("*")
-    .eq("agent_id", agentId)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;

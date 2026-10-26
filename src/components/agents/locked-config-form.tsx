@@ -3,6 +3,7 @@
 import { ShieldAlertIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { profileName, useCrm } from "@/components/crm/crm-provider";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -32,13 +33,18 @@ function toValues(row: AgentLockedConfig): Values {
   return values as Values;
 }
 
+const NO_ASSIGNEE = "__nadie__";
+
 /**
- * Capa bloqueada (solo superadmin; la RLS no la devuelve a nadie más):
- * identidad, reglas, modelo, tokens, techos y kill switch.
+ * Capa del proveedor (solo superadmin; la RLS no la devuelve a nadie más):
+ * identidad, reglas, información del negocio, escalamiento y traspaso,
+ * modelo, techos, rango de espera, umbral de aviso y kill switch.
  */
 export function LockedConfigForm({ agentId, onSaved }: { agentId: string; onSaved: () => void }) {
   const supabase = createClient();
+  const { profiles } = useCrm();
   const [values, setValues] = useState<Values | null>(null);
+  const [topicsText, setTopicsText] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -47,8 +53,9 @@ export function LockedConfigForm({ agentId, onSaved }: { agentId: string; onSave
       .then((row) => {
         if (cancelled || !row) return;
         setValues(toValues(row));
+        setTopicsText(row.escalation_topics.join(", "));
       })
-      .catch(() => toast.error("No se pudo cargar la capa bloqueada"));
+      .catch(() => toast.error("No se pudo cargar la capa del proveedor"));
     return () => {
       cancelled = true;
     };
@@ -67,14 +74,19 @@ export function LockedConfigForm({ agentId, onSaved }: { agentId: string; onSave
 
   async function save() {
     if (!values) return;
+    if (values.delay_seconds_min > values.delay_seconds_max) {
+      toast.error("La espera mínima no puede ser mayor que la máxima");
+      return;
+    }
     setSaving(true);
     try {
       const saved = await saveLockedConfig(supabase, agentId, values);
       setValues(toValues(saved));
+      setTopicsText(saved.escalation_topics.join(", "));
       onSaved();
-      toast.success("Capa bloqueada guardada");
+      toast.success("Capa del proveedor guardada");
     } catch (error) {
-      toast.error(errorMessage(error, "No se pudo guardar la capa bloqueada"));
+      toast.error(errorMessage(error, "No se pudo guardar la capa del proveedor"));
     } finally {
       setSaving(false);
     }
@@ -98,6 +110,81 @@ export function LockedConfigForm({ agentId, onSaved }: { agentId: string; onSave
           <div className="space-y-1.5">
             <Label htmlFor="lk-rules">Reglas de seguridad</Label>
             <Textarea id="lk-rules" rows={8} value={values.safety_rules} onChange={(e) => set("safety_rules", e.target.value)} />
+          </div>
+        </ConfigSection>
+
+        <ConfigSection title="Información del negocio" description="Única fuente de datos del asistente.">
+          <Textarea
+            rows={8}
+            maxLength={8000}
+            value={values.business_info}
+            onChange={(e) => set("business_info", e.target.value)}
+            placeholder="Qué hacen, productos y medidas, cobertura, horarios, ubicación, formas de pago…"
+            aria-label="Información del negocio"
+          />
+        </ConfigSection>
+
+        <ConfigSection title="Escalamiento y traspaso" description="Regla fija: pasa a una persona si el cliente lo pide o si no sabe.">
+          <div className="space-y-1.5">
+            <Label htmlFor="lk-topics">Temas que siempre pasan a una persona</Label>
+            <Input
+              id="lk-topics"
+              value={topicsText}
+              onChange={(e) => {
+                setTopicsText(e.target.value);
+                set(
+                  "escalation_topics",
+                  e.target.value
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter(Boolean),
+                );
+              }}
+              placeholder="queja, factura, garantía"
+            />
+            <p className="text-xs text-texto-suave">Separados por comas. Se detectan sin acentos ni mayúsculas.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="lk-handoff">Mensaje de traspaso</Label>
+            <Textarea
+              id="lk-handoff"
+              rows={2}
+              maxLength={500}
+              value={values.handoff_message}
+              onChange={(e) => set("handoff_message", e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="lk-assign">Asignar a</Label>
+            <Select
+              value={values.handoff_assign_to ?? NO_ASSIGNEE}
+              onValueChange={(v) => set("handoff_assign_to", v === NO_ASSIGNEE ? null : v)}
+            >
+              <SelectTrigger id="lk-assign" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                <SelectItem value={NO_ASSIGNEE}>Nadie (solo pausar)</SelectItem>
+                {profiles.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {profileName(p)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </ConfigSection>
+
+        <ConfigSection title="Espera y avisos" description="Rango de espera que puede elegir el cliente.">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <NumberInput id="lk-dmin" label="Espera mínima (s)" value={values.delay_seconds_min} onChange={(v) => set("delay_seconds_min", v)} />
+            <NumberInput id="lk-dmax" label="Espera máxima (s, hasta 3600)" value={values.delay_seconds_max} onChange={(v) => set("delay_seconds_max", v)} />
+            <NumberInput
+              id="lk-threshold"
+              label="Aviso de límite del mes (%)"
+              value={values.monthly_alert_threshold_pct}
+              onChange={(v) => set("monthly_alert_threshold_pct", v)}
+            />
           </div>
         </ConfigSection>
 
@@ -177,7 +264,7 @@ export function LockedConfigForm({ agentId, onSaved }: { agentId: string; onSave
       </fieldset>
       <div className="flex justify-end border-t px-5 py-3">
         <Button onClick={() => void save()} disabled={saving}>
-          {saving ? "Guardando…" : "Guardar capa bloqueada"}
+          {saving ? "Guardando…" : "Guardar capa del proveedor"}
         </Button>
       </div>
     </div>
