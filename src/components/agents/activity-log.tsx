@@ -105,6 +105,7 @@ export function ActivityLog({ agentIds, agentNames, refreshKey }: Props) {
                   </TableCell>
                   <TableCell className="hidden max-w-72 truncate text-texto-suave md:table-cell" title={row.reason ?? undefined}>
                     {row.reason ?? "—"}
+                    {row.handled_messages > 1 && <span className="text-xs"> · atendió {row.handled_messages} mensajes</span>}
                   </TableCell>
                   <TableCell className="hidden text-right tabular-nums sm:table-cell">
                     {numberFmt.format(row.input_tokens + row.output_tokens)}

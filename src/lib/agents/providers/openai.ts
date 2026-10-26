@@ -53,9 +53,10 @@ export const openAiProvider: ModelProvider = {
         parameters: t.parameters,
         strict: true,
       })),
-      // El agente siempre responde con UNA herramienta (nunca texto suelto).
+      // El agente siempre responde con herramientas (nunca texto suelto); puede
+      // elegir varias en orden (el motor usa como máximo MAX_ACTIONS_PER_RUN).
       tool_choice: "required",
-      parallel_tool_calls: false,
+      parallel_tool_calls: true,
       max_output_tokens: limits.maxOutputTokens,
       store: false,
     };
@@ -97,10 +98,10 @@ export const openAiProvider: ModelProvider = {
       throw new ModelProviderError(`Respuesta incompleta (${data.incomplete_details?.reason ?? "desconocido"})`, usage);
     }
 
-    let toolCall: GenerateReplyResult["toolCall"] = null;
+    const toolCalls: GenerateReplyResult["toolCalls"] = [];
     let text: string | null = null;
     for (const item of data.output ?? []) {
-      if (item.type === "function_call" && "name" in item && !toolCall) {
+      if (item.type === "function_call" && "name" in item) {
         let args: Record<string, unknown> = {};
         try {
           const parsed: unknown = JSON.parse(item.arguments || "{}");
@@ -108,13 +109,13 @@ export const openAiProvider: ModelProvider = {
         } catch {
           throw new ModelProviderError("Argumentos de herramienta no válidos", usage);
         }
-        toolCall = { name: item.name, arguments: args };
+        toolCalls.push({ name: item.name, arguments: args });
       } else if (item.type === "message" && "content" in item) {
         const t = item.content?.map((c) => c.text ?? "").join("").trim();
         if (t) text = t;
       }
     }
 
-    return { toolCall, text, usage, model: data.model ?? limits.model };
+    return { toolCalls, text, usage, model: data.model ?? limits.model };
   },
 };

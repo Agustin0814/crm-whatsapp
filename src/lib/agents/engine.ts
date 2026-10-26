@@ -2,7 +2,7 @@ import "server-only";
 import { isWindowOpen } from "@/lib/conversation-window";
 import { applyTemplate } from "@/lib/crm/templates";
 import type { createAdminClient } from "@/lib/supabase/admin";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Json, Tables } from "@/lib/supabase/database.types";
 import { WhatsAppApiError } from "@/lib/whatsapp/send";
 import { DEFAULT_LIMITS, isQuickReplyUsable, parseAgentConfig, type AgentConfig, type AgentLimits } from "./config";
 import {
@@ -12,8 +12,17 @@ import {
   matchEscalationTopic,
   scopeBlockReason,
 } from "./guards";
-import { AGENT_TOOLS, buildHistory, buildSystemPrompt, HISTORY_LIMIT } from "./prompt";
-import { getModelProvider, ModelProviderError } from "./provider";
+import {
+  AGENT_TOOLS,
+  buildHistory,
+  buildSystemPrompt,
+  buildUnansweredTurn,
+  HISTORY_LIMIT,
+  MAX_ACTIONS_PER_RUN,
+  PREVIOUS_REPLIES_LIMIT,
+  type PromptMessage,
+} from "./prompt";
+import { getModelProvider, ModelProviderError, type ToolCall } from "./provider";
 import { AgentSendError, sendAgentText } from "./send";
 
 // Motor común de los agentes. Todo límite y regla de seguridad se aplica aquí
@@ -29,6 +38,14 @@ const NO_USAGE: Usage = { inputTokens: 0, outputTokens: 0 };
 
 /** Texto máximo de una respuesta libre del agente (corta por diseño). */
 const MAX_REPLY_CHARS = 1000;
+
+/** Pausa entre mensajes de una misma corrida, para que lleguen en orden (ms). */
+export const PART_PAUSE_MS = 1500;
+
+export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Una parte de la respuesta (un mensaje). */
+export type ReplyPart = { text: string; quickReplyId: string | null };
 
 // ---------------------------------------------------------------------------
 // Fechas en la zona del negocio
@@ -49,14 +66,15 @@ function periodStarts(now: Date = new Date()): { day: string; month: string; mon
 }
 
 // ---------------------------------------------------------------------------
-// Programación (desde el webhook)
+// Programación (desde el webhook): espera por inactividad
 // ---------------------------------------------------------------------------
 
 /**
  * Programa la respuesta de cada agente habilitado a un mensaje entrante.
- * Si ya hay una corrida pendiente en la conversación, la pospone (una sola
- * respuesta aunque el cliente mande varios mensajes seguidos).
- * Devuelve true si alguna corrida quedó para ahora (retraso 0).
+ * Espera por inactividad: cada mensaje nuevo reinicia la espera del cliente,
+ * sin pasar del tope del proveedor (`max_wait_seconds`) desde el primer
+ * mensaje sin responder. Hay UNA sola corrida pendiente por chat (la base).
+ * Devuelve true si alguna corrida quedó para ahora (espera 0).
  * Nunca lanza: un error aquí no debe afectar el guardado del mensaje.
  */
 export async function scheduleAgentsForInbound(
@@ -66,7 +84,7 @@ export async function scheduleAgentsForInbound(
   try {
     const { data: agents, error } = await supabase
       .from("agents")
-      .select("id, config, agent_locked_config(kill_switch, delay_seconds_min, delay_seconds_max)")
+      .select("id, config, agent_locked_config(kill_switch, delay_seconds_min, delay_seconds_max, max_wait_seconds)")
       .eq("enabled", true);
     if (error || !agents?.length) return false;
 
@@ -81,24 +99,14 @@ export async function scheduleAgentsForInbound(
     for (const agent of agents) {
       const locked = agent.agent_locked_config;
       if (!locked || locked.kill_switch) continue;
-      // La espera (segundos) se recorta otra vez al rango del proveedor.
-      const config = parseAgentConfig(agent.config, {
-        ...DEFAULT_LIMITS,
-        delay_seconds_min: locked.delay_seconds_min,
-        delay_seconds_max: locked.delay_seconds_max,
+      const delay = await scheduleRun(supabase, {
+        agentId: agent.id,
+        conversationId: input.conversationId,
+        messageId: input.messageId,
+        rawConfig: agent.config,
+        locked,
       });
-      const runAt = new Date(Date.now() + config.delay_seconds * 1000).toISOString();
-      const { error: scheduleError } = await supabase.rpc("schedule_agent_run", {
-        p_agent_id: agent.id,
-        p_conversation_id: input.conversationId,
-        p_message_id: input.messageId,
-        p_run_at: runAt,
-      });
-      if (scheduleError) {
-        console.error(`[agents] No se pudo programar la respuesta: ${scheduleError.message}`);
-        continue;
-      }
-      if (config.delay_seconds === 0) immediate = true;
+      if (delay === 0) immediate = true;
     }
     return immediate;
   } catch (error) {
@@ -107,8 +115,39 @@ export async function scheduleAgentsForInbound(
   }
 }
 
+/** Programa o reprograma la corrida de un chat. Devuelve la espera usada (o null si falló). */
+async function scheduleRun(
+  supabase: AdminClient,
+  input: {
+    agentId: string;
+    conversationId: string;
+    messageId: string | null;
+    rawConfig: Json;
+    locked: Pick<Locked, "delay_seconds_min" | "delay_seconds_max" | "max_wait_seconds">;
+  },
+): Promise<number | null> {
+  // La espera (segundos) se recorta otra vez al rango del proveedor.
+  const config = parseAgentConfig(input.rawConfig, {
+    ...DEFAULT_LIMITS,
+    delay_seconds_min: input.locked.delay_seconds_min,
+    delay_seconds_max: input.locked.delay_seconds_max,
+  });
+  const { error } = await supabase.rpc("schedule_agent_run", {
+    p_agent_id: input.agentId,
+    p_conversation_id: input.conversationId,
+    p_message_id: input.messageId as string,
+    p_delay_seconds: config.delay_seconds,
+    p_max_wait_seconds: input.locked.max_wait_seconds,
+  });
+  if (error) {
+    console.error(`[agents] No se pudo programar la respuesta: ${error.message}`);
+    return null;
+  }
+  return config.delay_seconds;
+}
+
 // ---------------------------------------------------------------------------
-// Procesador (cron cada minuto o inmediato)
+// Procesador (cron cada 10 s o inmediato)
 // ---------------------------------------------------------------------------
 
 /**
@@ -142,6 +181,51 @@ export async function processDueRuns(supabase: AdminClient, limit = 10): Promise
 }
 
 // ---------------------------------------------------------------------------
+// Mensajes sin responder (snapshot)
+// ---------------------------------------------------------------------------
+
+type InboundRow = { id: string; type: string; body: string | null; created_at: string };
+
+/**
+ * Mensajes del cliente posteriores al último instante respondido: el último
+ * saliente de una persona o lo que vio el modelo al generar su último mensaje
+ * (`messages.agent_answered_through`). NO se compara con la hora de envío.
+ */
+export async function loadUnanswered(
+  supabase: AdminClient,
+  conversationId: string,
+): Promise<{ answeredThrough: string | null; unanswered: InboundRow[] }> {
+  const { data: answeredThrough, error } = await supabase.rpc("agent_answered_through", {
+    p_conversation_id: conversationId,
+  });
+  if (error) throw new Error(`No se pudo leer lo respondido: ${error.message}`);
+  let query = supabase
+    .from("messages")
+    .select("id, type, body, created_at")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound")
+    .order("created_at", { ascending: true })
+    .limit(30);
+  if (answeredThrough) query = query.gt("created_at", answeredThrough);
+  const { data } = await query;
+  return { answeredThrough: answeredThrough ?? null, unanswered: data ?? [] };
+}
+
+/** ¿Llegó algún mensaje del cliente después del snapshot? */
+async function newerInbound(supabase: AdminClient, conversationId: string, seenAt: string): Promise<InboundRow | null> {
+  const { data } = await supabase
+    .from("messages")
+    .select("id, type, body, created_at")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound")
+    .gt("created_at", seenAt)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Una corrida
 // ---------------------------------------------------------------------------
 
@@ -151,6 +235,7 @@ type RunContext = {
   supabase: AdminClient;
   run: Run;
   agentId: string;
+  agentConfigRaw: Json;
   mode: "suggestion" | "automatic";
   config: AgentConfig;
   locked: Locked;
@@ -165,10 +250,12 @@ type RunContext = {
     phone: string | null;
     company: string | null;
   };
+  /** Último mensaje del cliente que vio esta corrida y cuántos atendió. */
+  snapshot: { lastInboundId: string; lastInboundAt: string; handled: number };
 };
 
 async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
-  // --- Agente y capa bloqueada ---
+  // --- Agente y capa del proveedor ---
   const { data: agent } = await supabase
     .from("agents")
     .select("id, enabled, mode, config, agent_locked_config(*)")
@@ -203,24 +290,19 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
   if (!isWindowOpen(conversation.last_inbound_at)) return skip(supabase, run, "Fuera de la ventana de 24 h");
   if (!contact.wa_id) return skip(supabase, run, "Contacto sin WhatsApp");
 
-  // --- ¿Ya respondió alguien? ---
-  const { data: latest } = await supabase
-    .from("messages")
-    .select("id, direction, created_at")
-    .eq("conversation_id", conversation.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!latest || latest.direction !== "inbound") return skip(supabase, run, "Ya hubo una respuesta");
+  // --- Snapshot: mensajes del cliente sin responder ---
+  const { unanswered } = await loadUnanswered(supabase, conversation.id);
+  const last = unanswered.at(-1);
+  if (!last) return skip(supabase, run, "Ya se respondieron todos los mensajes");
+  await supabase
+    .from("agent_scheduled_runs")
+    .update({ seen_inbound_at: last.created_at, seen_message_id: last.id })
+    .eq("id", run.id);
+  const snapshot = { lastInboundId: last.id, lastInboundAt: last.created_at, handled: unanswered.length };
 
-  const { data: trigger } = run.trigger_message_id
-    ? await supabase.from("messages").select("id, body, created_at").eq("id", run.trigger_message_id).maybeSingle()
-    : { data: null };
-  const triggerAt = trigger?.created_at ?? latest.created_at;
-
-  // En automático, si una persona abrió el chat durante el retraso, no se responde.
-  if (mode === "automatic" && conversation.human_seen_at && conversation.human_seen_at >= triggerAt) {
-    return skip(supabase, run, "Una persona abrió el chat");
+  // En automático, si una persona abrió el chat después del último mensaje, no se responde.
+  if (mode === "automatic" && conversation.human_seen_at && conversation.human_seen_at >= last.created_at) {
+    return skip(supabase, run, "Una persona abrió el chat", true, snapshot.handled);
   }
 
   // --- Alcance y horario ---
@@ -228,18 +310,20 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     classification: contact.classification,
     tagIds: contact.contact_tags.map((t) => t.tag_id),
   });
-  if (scopeReason) return skip(supabase, run, scopeReason);
-  if (!isScheduleActive(config.schedule)) return skip(supabase, run, "Fuera del horario del asistente");
+  if (scopeReason) return skip(supabase, run, scopeReason, true, snapshot.handled);
+  if (!isScheduleActive(config.schedule)) return skip(supabase, run, "Fuera del horario del asistente", true, snapshot.handled);
 
   const ctx: RunContext = {
     supabase,
     run,
     agentId: agent.id,
+    agentConfigRaw: agent.config,
     mode,
     config,
     locked,
     conversation,
     contact,
+    snapshot,
   };
 
   // --- Límite de respuestas seguidas sin intervención humana ---
@@ -247,19 +331,22 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     return handoff(ctx, `Límite de ${config.limits.max_consecutive} respuestas seguidas`, NO_USAGE, "limit_consecutive");
   }
 
-  // --- Topes diario y mensual ---
+  // --- Topes diario (mensajes) y mensual (tokens) ---
   const periods = periodStarts();
-  const { count: todayCount } = await supabase
+  const { data: today } = await supabase
     .from("agent_usage_log")
-    .select("id", { count: "exact", head: true })
+    .select("messages_count")
     .eq("agent_id", agent.id)
     .gte("created_at", periods.day)
     .in("outcome", ["sent", "suggested", "handoff"]);
-  if ((todayCount ?? 0) >= config.limits.daily_cap) {
+  // Cada mensaje enviado o sugerido cuenta para el tope diario.
+  const usedToday = (today ?? []).reduce((sum, r) => sum + (r.messages_count || 1), 0);
+  const remainingToday = config.limits.daily_cap - usedToday;
+  if (remainingToday <= 0) {
     if (config.alerts.on_daily_cap) {
-      await alertOnce(supabase, agent.id, "daily_cap", "admin", periods.day, `El asistente llegó al tope diario de ${config.limits.daily_cap} respuestas.`);
+      await alertOnce(supabase, agent.id, "daily_cap", "admin", periods.day, `${config.display_name} llegó al tope diario de ${config.limits.daily_cap} respuestas.`);
     }
-    return block(supabase, run, `Tope diario (${config.limits.daily_cap})`);
+    return block(supabase, run, `Tope diario (${config.limits.daily_cap})`, snapshot.handled);
   }
 
   const { data: month } = await supabase
@@ -271,7 +358,7 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
   const monthTokens = (month?.input_tokens ?? 0) + (month?.output_tokens ?? 0);
   if (monthTokens >= locked.monthly_token_cap) {
     await alertOnce(supabase, agent.id, "token_cap", "superadmin", periods.month, `Se alcanzó el tope mensual de ${locked.monthly_token_cap.toLocaleString("es-MX")} tokens. El asistente se detuvo hasta el próximo mes.`);
-    return block(supabase, run, "Tope mensual de tokens");
+    return block(supabase, run, "Tope mensual de tokens", snapshot.handled);
   }
   // Aviso al cliente al acercarse al límite del mes (umbral del proveedor).
   if (
@@ -289,11 +376,13 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     );
   }
 
-  // --- Temas de escalamiento (sin gastar tokens) ---
-  const topic = trigger?.body ? matchEscalationTopic(trigger.body, locked.escalation_topics) : null;
-  if (topic) return handoff(ctx, `Tema de escalamiento: ${topic}`, NO_USAGE);
+  // --- Temas de escalamiento en CUALQUIER mensaje sin responder (sin gastar tokens) ---
+  for (const m of unanswered) {
+    const topic = m.body ? matchEscalationTopic(m.body, locked.escalation_topics) : null;
+    if (topic) return handoff(ctx, `Tema de escalamiento: ${topic}`, NO_USAGE);
+  }
 
-  // --- Respuestas rápidas permitidas e historial ---
+  // --- Respuestas rápidas permitidas, historial y lo que ya respondió ---
   // Regla efectiva: el proveedor no la marcó «solo humano» Y el cliente la encendió.
   const { data: quickReplies } = await supabase
     .from("quick_replies")
@@ -302,15 +391,34 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     .order("shortcut");
   const allowedReplies = (quickReplies ?? []).filter((q) => isQuickReplyUsable(q, config));
 
+  const unansweredIds = new Set(unanswered.map((m) => m.id));
   const { data: recent } = await supabase
     .from("messages")
-    .select("direction, type, body")
+    .select("id, direction, type, body, sent_by_agent")
     .eq("conversation_id", conversation.id)
     .order("created_at", { ascending: false })
-    .limit(HISTORY_LIMIT);
+    .limit(HISTORY_LIMIT + unanswered.length);
+  const ordered = (recent ?? []).reverse();
+  // El historial NO incluye los sin responder: van en su propio bloque marcado al final.
   const history = buildHistory(
-    (recent ?? []).reverse().map((m) => ({ direction: m.direction === "inbound" ? "inbound" : "outbound", type: m.type, body: m.body })),
+    ordered
+      .filter((m) => !unansweredIds.has(m.id))
+      .slice(-HISTORY_LIMIT)
+      .map((m) => ({ direction: m.direction === "inbound" ? "inbound" : "outbound", type: m.type, body: m.body })),
   );
+  const unansweredPrompt: PromptMessage[] = unanswered.map((m) => ({ direction: "inbound", type: m.type, body: m.body }));
+
+  const { data: previous } = await supabase
+    .from("messages")
+    .select("body")
+    .eq("conversation_id", conversation.id)
+    .eq("sent_by_agent", true)
+    .order("created_at", { ascending: false })
+    .limit(PREVIOUS_REPLIES_LIMIT);
+  const previousReplies = (previous ?? [])
+    .map((m) => m.body?.trim() ?? "")
+    .filter(Boolean)
+    .reverse();
 
   const system = buildSystemPrompt({
     lockedSystemPrompt: locked.system_prompt,
@@ -320,6 +428,8 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     config,
     quickReplies: allowedReplies,
     contactFirstName: contact.name?.trim().split(/\s+/)[0] || null,
+    agentAlreadySpoke: previousReplies.length > 0,
+    previousReplies,
   });
   const tools = AGENT_TOOLS.filter(
     (t) => locked.allowed_tools.includes(t.name) && (t.name !== "enviar_respuesta_rapida" || allowedReplies.length > 0),
@@ -330,7 +440,7 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
   try {
     result = await getModelProvider().generateReply({
       system,
-      messages: history,
+      messages: [...history, buildUnansweredTurn(unansweredPrompt)],
       tools,
       limits: {
         model: locked.model,
@@ -342,75 +452,113 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
   } catch (error) {
     const usage = error instanceof ModelProviderError ? error.usage : NO_USAGE;
     const reason = error instanceof ModelProviderError ? error.message : "Error del modelo";
-    await logUsage(supabase, { run, outcome: "error", reason, usage, model: locked.model, locked });
+    await logUsage(supabase, { run, outcome: "error", reason, usage, model: locked.model, locked, handled: snapshot.handled });
     // Los errores técnicos solo los ve el proveedor.
     await alertOnce(supabase, agent.id, "error", "superadmin", periods.day, "El asistente tuvo errores al generar respuestas hoy. Revisa el registro de actividad.");
     return { acted: true, reason };
   }
 
   const usage = result.usage;
-  const call = result.toolCall ?? (result.text ? { name: "responder_texto_corto", arguments: { texto: result.text } } : null);
-  if (!call || !locked.allowed_tools.includes(call.name)) {
-    await logUsage(supabase, { run, outcome: "error", reason: "El modelo no eligió una herramienta permitida", usage, model: result.model, locked });
+  const calls: ToolCall[] = (
+    result.toolCalls.length ? result.toolCalls : result.text ? [{ name: "responder_texto_corto", arguments: { texto: result.text } }] : []
+  )
+    .filter((c) => locked.allowed_tools.includes(c.name))
+    .slice(0, MAX_ACTIONS_PER_RUN);
+  if (!calls.length) {
+    await logUsage(supabase, { run, outcome: "error", reason: "El modelo no eligió una herramienta permitida", usage, model: result.model, locked, handled: snapshot.handled });
     return { acted: true, reason: "Herramienta no permitida" };
   }
 
-  switch (call.name) {
-    case "transferir_a_humano": {
-      const motivo = typeof call.arguments.motivo === "string" ? call.arguments.motivo.trim().slice(0, 200) : "";
-      return handoff(ctx, motivo ? `El asistente transfirió: ${motivo}` : "El asistente transfirió a una persona", usage, "handoff", result.model);
-    }
-    case "enviar_respuesta_rapida": {
+  // Transferir gana sobre todo lo demás: solo se hace el traspaso.
+  const transfer = calls.find((c) => c.name === "transferir_a_humano");
+  if (transfer) {
+    const motivo = typeof transfer.arguments.motivo === "string" ? transfer.arguments.motivo.trim().slice(0, 200) : "";
+    return handoff(ctx, motivo ? `El asistente transfirió: ${motivo}` : "El asistente transfirió a una persona", usage, "handoff", result.model);
+  }
+
+  // --- Convertir las herramientas en mensajes (en orden) ---
+  const parts: ReplyPart[] = [];
+  const reasons: string[] = [];
+  let needsApproval = false;
+  for (const call of calls) {
+    if (call.name === "enviar_respuesta_rapida") {
       const shortcut = typeof call.arguments.shortcut === "string" ? call.arguments.shortcut.trim().replace(/^\//, "") : "";
       const reply = allowedReplies.find((q) => q.shortcut === shortcut);
       if (!reply) {
-        await logUsage(supabase, { run, outcome: "error", reason: `Respuesta rápida no permitida: ${shortcut || "(vacía)"}`, usage, model: result.model, locked });
-        return { acted: true, reason: "Respuesta rápida no permitida" };
+        reasons.push(`respuesta rápida no permitida (${shortcut || "vacía"})`);
+        continue;
       }
-      return deliver(ctx, {
-        text: applyTemplate(reply.body, contact),
-        quickReplyId: reply.id,
-        // «Con aprobación»: siempre queda como sugerencia, aun en automático.
-        forceSuggestion: reply.agent_permission === "approval",
-        usage,
-        model: result.model,
-        reason: `Respuesta rápida /${reply.shortcut}`,
-      });
-    }
-    default: {
+      // «Con aprobación»: siempre queda como sugerencia, aun en automático.
+      if (reply.agent_permission === "approval") needsApproval = true;
+      parts.push({ text: applyTemplate(reply.body, contact), quickReplyId: reply.id });
+      reasons.push(`/${reply.shortcut}`);
+    } else {
       const texto = typeof call.arguments.texto === "string" ? call.arguments.texto.trim().slice(0, MAX_REPLY_CHARS) : "";
-      if (!texto) {
-        await logUsage(supabase, { run, outcome: "error", reason: "Respuesta vacía", usage, model: result.model, locked });
-        return { acted: true, reason: "Respuesta vacía" };
-      }
-      return deliver(ctx, { text: texto, quickReplyId: null, forceSuggestion: false, usage, model: result.model, reason: "Texto corto" });
+      if (!texto) continue;
+      parts.push({ text: texto, quickReplyId: null });
+      reasons.push("texto corto");
     }
   }
+  if (!parts.length) {
+    await logUsage(supabase, { run, outcome: "error", reason: `Sin mensajes válidos (${reasons.join(", ") || "vacío"})`, usage, model: result.model, locked, handled: snapshot.handled });
+    return { acted: true, reason: "Sin mensajes válidos" };
+  }
+  // El tope diario cuenta cada mensaje: se recortan los que no caben.
+  const allowedParts = parts.slice(0, Math.max(1, remainingToday));
+  if (allowedParts.length < parts.length) reasons.push(`recortado por el tope diario (${allowedParts.length}/${parts.length})`);
+
+  return deliver(ctx, {
+    parts: allowedParts,
+    forceSuggestion: needsApproval,
+    usage,
+    model: result.model,
+    reason: `${allowedParts.length > 1 ? `${allowedParts.length} mensajes: ` : ""}${reasons.join(", ")}`,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Acciones
 // ---------------------------------------------------------------------------
 
+type DeliverResult = RunResult & { stale?: boolean };
+
 /**
- * Entrega una respuesta: en modo sugerencia (o si se exige aprobación) deja
- * un borrador para el operador; en automático la envía por WhatsApp.
+ * Entrega la respuesta. Justo antes, vuelve a mirar si llegaron mensajes del
+ * cliente desde el snapshot: si llegaron, la respuesta está obsoleta y se
+ * DESCARTA (queda una corrida pendiente que los incluya todos).
+ * En modo sugerencia (o si se exige aprobación) deja un borrador; en
+ * automático envía cada parte con una pausa breve entre ellas.
  */
 async function deliver(
   ctx: RunContext,
   input: {
-    text: string;
-    quickReplyId: string | null;
+    parts: ReplyPart[];
     forceSuggestion: boolean;
     usage: Usage;
     model?: string;
     reason: string;
     outcome?: "handoff";
   },
-): Promise<RunResult> {
-  const { supabase, run } = ctx;
-  const asSuggestion = ctx.mode === "suggestion" || input.forceSuggestion;
+): Promise<DeliverResult> {
+  const { supabase, run, snapshot } = ctx;
+  const base = { run, usage: input.usage, model: input.model, locked: ctx.locked, handled: snapshot.handled };
 
+  const newer = await newerInbound(supabase, ctx.conversation.id, snapshot.lastInboundAt);
+  if (newer) {
+    await logUsage(supabase, { ...base, outcome: "skipped", reason: "Omitido: llegó un mensaje nuevo", discardedStale: true });
+    // Asegura una corrida pendiente con todos los mensajes. Si ya existe (la creó el
+    // webhook), la base la conserva: nunca la adelanta y no pasa del tope de espera.
+    await scheduleRun(supabase, {
+      agentId: ctx.agentId,
+      conversationId: ctx.conversation.id,
+      messageId: newer.id,
+      rawConfig: ctx.agentConfigRaw,
+      locked: ctx.locked,
+    });
+    return { acted: false, reason: "Omitido: llegó un mensaje nuevo", stale: true };
+  }
+
+  const asSuggestion = ctx.mode === "suggestion" || input.forceSuggestion;
   if (asSuggestion) {
     await supabase
       .from("agent_suggestions")
@@ -420,28 +568,40 @@ async function deliver(
     const { error } = await supabase.from("agent_suggestions").insert({
       agent_id: ctx.agentId,
       conversation_id: ctx.conversation.id,
-      trigger_message_id: run.trigger_message_id,
-      body: input.text,
-      quick_reply_id: input.quickReplyId,
+      trigger_message_id: snapshot.lastInboundId,
+      run_id: run.id,
+      seen_inbound_at: snapshot.lastInboundAt,
+      body: input.parts.map((p) => p.text).join("\n\n"),
+      parts: input.parts.map((p) => ({ text: p.text, quick_reply_id: p.quickReplyId })),
+      quick_reply_id: input.parts[0]?.quickReplyId ?? null,
     });
     if (error) {
-      await logUsage(supabase, { run, outcome: "error", reason: "No se pudo guardar la sugerencia", usage: input.usage, model: input.model, locked: ctx.locked });
+      await logUsage(supabase, { ...base, outcome: "error", reason: "No se pudo guardar la sugerencia" });
       return { acted: true, reason: "No se pudo guardar la sugerencia" };
     }
-    await logUsage(supabase, { run, outcome: input.outcome ?? "suggested", reason: input.reason, usage: input.usage, model: input.model, locked: ctx.locked });
+    await logUsage(supabase, { ...base, outcome: input.outcome ?? "suggested", reason: input.reason, messagesCount: input.parts.length });
     return { acted: true, reason: input.reason };
   }
 
+  let sent = 0;
+  let firstMessageId: string | undefined;
   try {
-    const { messageId } = await sendAgentText(supabase, {
-      conversationId: ctx.conversation.id,
-      waId: ctx.contact.wa_id,
-      lastInboundAt: ctx.conversation.last_inbound_at,
-      text: input.text,
-      agentId: ctx.agentId,
-      senderId: null,
-    });
-    await logUsage(supabase, { run, outcome: input.outcome ?? "sent", reason: input.reason, usage: input.usage, model: input.model, locked: ctx.locked, messageId });
+    for (const part of input.parts) {
+      if (sent > 0) await sleep(PART_PAUSE_MS);
+      const { messageId } = await sendAgentText(supabase, {
+        conversationId: ctx.conversation.id,
+        waId: ctx.contact.wa_id,
+        lastInboundAt: ctx.conversation.last_inbound_at,
+        text: part.text,
+        agentId: ctx.agentId,
+        senderId: null,
+        answeredThrough: snapshot.lastInboundAt,
+        runId: run.id,
+      });
+      firstMessageId ??= messageId;
+      sent += 1;
+    }
+    await logUsage(supabase, { ...base, outcome: input.outcome ?? "sent", reason: input.reason, messageId: firstMessageId, messagesCount: sent });
     return { acted: true, reason: input.reason };
   } catch (error) {
     const reason =
@@ -450,7 +610,13 @@ async function deliver(
         : error instanceof WhatsAppApiError
           ? `WhatsApp rechazó el envío (${error.code ?? "?"})`
           : "No se pudo enviar";
-    await logUsage(supabase, { run, outcome: "error", reason, usage: input.usage, model: input.model, locked: ctx.locked });
+    await logUsage(supabase, {
+      ...base,
+      outcome: sent > 0 ? (input.outcome ?? "sent") : "error",
+      reason: sent > 0 ? `${input.reason} (se enviaron ${sent} de ${input.parts.length}: ${reason})` : reason,
+      messageId: firstMessageId,
+      messagesCount: sent,
+    });
     return { acted: true, reason };
   }
 }
@@ -458,6 +624,8 @@ async function deliver(
 /**
  * Transfiere a una persona: entrega el mensaje de traspaso del proveedor,
  * pausa el agente en el chat, asigna (si el proveedor lo configuró) y avisa.
+ * Si llegaron mensajes nuevos antes de entregarlo, no transfiere todavía: la
+ * siguiente corrida decide con todos los mensajes.
  */
 async function handoff(
   ctx: RunContext,
@@ -468,14 +636,14 @@ async function handoff(
 ): Promise<RunResult> {
   const { supabase, config, locked } = ctx;
   const result = await deliver(ctx, {
-    text: locked.handoff_message,
-    quickReplyId: null,
+    parts: [{ text: locked.handoff_message, quickReplyId: null }],
     forceSuggestion: false,
     usage,
     model,
     reason,
     outcome: "handoff",
   });
+  if (result.stale) return result;
 
   // El trigger de conversations no reasigna la pausa si ya viene pausada.
   await supabase
@@ -500,13 +668,13 @@ async function handoff(
   return { ...result, reason };
 }
 
-async function skip(supabase: AdminClient, run: Run, reason: string, log = true): Promise<RunResult> {
-  if (log) await logUsage(supabase, { run, outcome: "skipped", reason, usage: NO_USAGE });
+async function skip(supabase: AdminClient, run: Run, reason: string, log = true, handled = 0): Promise<RunResult> {
+  if (log) await logUsage(supabase, { run, outcome: "skipped", reason, usage: NO_USAGE, handled });
   return { acted: false, reason };
 }
 
-async function block(supabase: AdminClient, run: Run, reason: string): Promise<RunResult> {
-  await logUsage(supabase, { run, outcome: "blocked_by_limit", reason, usage: NO_USAGE });
+async function block(supabase: AdminClient, run: Run, reason: string, handled = 0): Promise<RunResult> {
+  await logUsage(supabase, { run, outcome: "blocked_by_limit", reason, usage: NO_USAGE, handled });
   return { acted: false, reason };
 }
 
@@ -520,6 +688,12 @@ async function logUsage(
     model?: string;
     locked?: Locked;
     messageId?: string;
+    /** Mensajes del cliente que atendió la corrida. */
+    handled?: number;
+    /** Mensajes que produjo (enviados o sugeridos): cuentan para el tope diario. */
+    messagesCount?: number;
+    /** Respuesta descartada porque llegaron mensajes nuevos. */
+    discardedStale?: boolean;
   },
 ): Promise<void> {
   const cost = input.locked
@@ -539,6 +713,9 @@ async function logUsage(
     est_cost_usd: cost,
     outcome: input.outcome,
     reason: input.reason.slice(0, 300),
+    handled_messages: input.handled ?? 0,
+    messages_count: input.messagesCount ?? 0,
+    discarded_stale: input.discardedStale ?? false,
   });
   if (error) console.error(`[agents] No se pudo registrar el uso: ${error.message}`);
 }

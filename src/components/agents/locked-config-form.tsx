@@ -60,6 +60,7 @@ const FIELD_LABELS: Partial<Record<keyof Values, string>> = {
   output_price_per_mtok: "precio de salida",
   delay_seconds_min: "espera mínima",
   delay_seconds_max: "espera máxima",
+  max_wait_seconds: "tope de espera total",
   monthly_alert_threshold_pct: "aviso del mes",
   kill_switch: "kill switch",
 };
@@ -252,10 +253,19 @@ export function LockedConfigForm({ agentId, onSaved, onDirtyChange }: Props) {
           </div>
         </ConfigSection>
 
-        <ConfigSection title="Espera y avisos" description="Rango de espera que puede elegir el cliente.">
+        <ConfigSection
+          title="Espera y avisos"
+          description="Rango de espera del cliente. Cada mensaje nuevo reinicia la espera, sin pasar del tope total desde el primer mensaje sin responder."
+        >
           <div className="grid gap-4 sm:grid-cols-2">
             <NumberInput id="lk-dmin" label="Espera mínima (s)" value={values.delay_seconds_min} onChange={(v) => set("delay_seconds_min", v)} />
             <NumberInput id="lk-dmax" label="Espera máxima (s, hasta 3600)" value={values.delay_seconds_max} onChange={(v) => set("delay_seconds_max", v)} />
+            <NumberInput
+              id="lk-maxwait"
+              label="Tope de espera total (s, 10–600)"
+              value={values.max_wait_seconds}
+              onChange={(v) => set("max_wait_seconds", v)}
+            />
             <NumberInput
               id="lk-threshold"
               label="Aviso de límite del mes (%)"

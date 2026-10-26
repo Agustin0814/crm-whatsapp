@@ -27,9 +27,11 @@ export type GenerateReplyInput = {
   limits: GenerateLimits;
 };
 
+export type ToolCall = { name: string; arguments: Record<string, unknown> };
+
 export type GenerateReplyResult = {
-  /** Herramienta elegida por el modelo (null si respondió sin herramienta). */
-  toolCall: { name: string; arguments: Record<string, unknown> } | null;
+  /** Herramientas elegidas por el modelo, en orden (vacío si respondió sin herramienta). */
+  toolCalls: ToolCall[];
   /** Texto libre, si el modelo lo devolvió en lugar de una herramienta. */
   text: string | null;
   /** Tokens reales que reporta la API. */

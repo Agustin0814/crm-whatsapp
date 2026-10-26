@@ -79,6 +79,7 @@ export type Database = {
           kill_switch: boolean
           max_consecutive_ceiling: number
           max_output_tokens: number
+          max_wait_seconds: number
           model: string
           monthly_alert_threshold_pct: number
           monthly_token_cap: number
@@ -104,6 +105,7 @@ export type Database = {
           kill_switch?: boolean
           max_consecutive_ceiling?: number
           max_output_tokens?: number
+          max_wait_seconds?: number
           model?: string
           monthly_alert_threshold_pct?: number
           monthly_token_cap?: number
@@ -129,6 +131,7 @@ export type Database = {
           kill_switch?: boolean
           max_consecutive_ceiling?: number
           max_output_tokens?: number
+          max_wait_seconds?: number
           model?: string
           monthly_alert_threshold_pct?: number
           monthly_token_cap?: number
@@ -170,9 +173,12 @@ export type Database = {
           attempts: number
           conversation_id: string
           created_at: string
+          first_pending_at: string | null
           id: string
           reason: string | null
           run_at: string
+          seen_inbound_at: string | null
+          seen_message_id: string | null
           status: string
           trigger_message_id: string | null
           updated_at: string
@@ -182,9 +188,12 @@ export type Database = {
           attempts?: number
           conversation_id: string
           created_at?: string
+          first_pending_at?: string | null
           id?: string
           reason?: string | null
           run_at: string
+          seen_inbound_at?: string | null
+          seen_message_id?: string | null
           status?: string
           trigger_message_id?: string | null
           updated_at?: string
@@ -194,9 +203,12 @@ export type Database = {
           attempts?: number
           conversation_id?: string
           created_at?: string
+          first_pending_at?: string | null
           id?: string
           reason?: string | null
           run_at?: string
+          seen_inbound_at?: string | null
+          seen_message_id?: string | null
           status?: string
           trigger_message_id?: string | null
           updated_at?: string
@@ -217,6 +229,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "agent_scheduled_runs_seen_message_id_fkey"
+            columns: ["seen_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "agent_scheduled_runs_trigger_message_id_fkey"
             columns: ["trigger_message_id"]
             isOneToOne: false
@@ -232,9 +251,12 @@ export type Database = {
           conversation_id: string
           created_at: string
           id: string
+          parts: Json
           quick_reply_id: string | null
           resolved_at: string | null
           resolved_by: string | null
+          run_id: string | null
+          seen_inbound_at: string | null
           status: string
           trigger_message_id: string | null
         }
@@ -244,9 +266,12 @@ export type Database = {
           conversation_id: string
           created_at?: string
           id?: string
+          parts?: Json
           quick_reply_id?: string | null
           resolved_at?: string | null
           resolved_by?: string | null
+          run_id?: string | null
+          seen_inbound_at?: string | null
           status?: string
           trigger_message_id?: string | null
         }
@@ -256,9 +281,12 @@ export type Database = {
           conversation_id?: string
           created_at?: string
           id?: string
+          parts?: Json
           quick_reply_id?: string | null
           resolved_at?: string | null
           resolved_by?: string | null
+          run_id?: string | null
+          seen_inbound_at?: string | null
           status?: string
           trigger_message_id?: string | null
         }
@@ -292,6 +320,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "agent_suggestions_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "agent_scheduled_runs"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "agent_suggestions_trigger_message_id_fkey"
             columns: ["trigger_message_id"]
             isOneToOne: false
@@ -305,10 +340,13 @@ export type Database = {
           agent_id: string
           conversation_id: string | null
           created_at: string
+          discarded_stale: boolean
           est_cost_usd: number
+          handled_messages: number
           id: string
           input_tokens: number
           message_id: string | null
+          messages_count: number
           model: string | null
           outcome: string
           output_tokens: number
@@ -319,10 +357,13 @@ export type Database = {
           agent_id: string
           conversation_id?: string | null
           created_at?: string
+          discarded_stale?: boolean
           est_cost_usd?: number
+          handled_messages?: number
           id?: string
           input_tokens?: number
           message_id?: string | null
+          messages_count?: number
           model?: string | null
           outcome: string
           output_tokens?: number
@@ -333,10 +374,13 @@ export type Database = {
           agent_id?: string
           conversation_id?: string | null
           created_at?: string
+          discarded_stale?: boolean
           est_cost_usd?: number
+          handled_messages?: number
           id?: string
           input_tokens?: number
           message_id?: string | null
+          messages_count?: number
           model?: string | null
           outcome?: string
           output_tokens?: number
@@ -1043,7 +1087,9 @@ export type Database = {
       }
       messages: {
         Row: {
+          agent_answered_through: string | null
           agent_id: string | null
+          agent_run_id: string | null
           body: string | null
           conversation_id: string
           created_at: string
@@ -1065,7 +1111,9 @@ export type Database = {
           wa_timestamp: string | null
         }
         Insert: {
+          agent_answered_through?: string | null
           agent_id?: string | null
+          agent_run_id?: string | null
           body?: string | null
           conversation_id: string
           created_at?: string
@@ -1087,7 +1135,9 @@ export type Database = {
           wa_timestamp?: string | null
         }
         Update: {
+          agent_answered_through?: string | null
           agent_id?: string | null
+          agent_run_id?: string | null
           body?: string | null
           conversation_id?: string
           created_at?: string
@@ -1114,6 +1164,13 @@ export type Database = {
             columns: ["agent_id"]
             isOneToOne: false
             referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_agent_run_id_fkey"
+            columns: ["agent_run_id"]
+            isOneToOne: false
+            referencedRelation: "agent_scheduled_runs"
             referencedColumns: ["id"]
           },
           {
@@ -1679,6 +1736,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      agent_answered_through: {
+        Args: { p_conversation_id: string }
+        Returns: string
+      }
       agent_limits: { Args: { p_key: string }; Returns: Json }
       agent_usage_summary: { Args: { p_key: string }; Returns: Json }
       approve_order: {
@@ -1717,9 +1778,12 @@ export type Database = {
           attempts: number
           conversation_id: string
           created_at: string
+          first_pending_at: string | null
           id: string
           reason: string | null
           run_at: string
+          seen_inbound_at: string | null
+          seen_message_id: string | null
           status: string
           trigger_message_id: string | null
           updated_at: string
@@ -1865,8 +1929,9 @@ export type Database = {
         Args: {
           p_agent_id: string
           p_conversation_id: string
+          p_delay_seconds: number
+          p_max_wait_seconds: number
           p_message_id: string
-          p_run_at: string
         }
         Returns: string
       }

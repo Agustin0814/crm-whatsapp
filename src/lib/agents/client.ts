@@ -152,12 +152,25 @@ export async function fetchPendingAgentSuggestion(supabase: Client, conversation
   return data;
 }
 
-/** Envía (tal cual o editada) o descarta una sugerencia. El envío va por el servidor. */
-export async function resolveAgentSuggestion(id: string, action: "send" | "discard", text?: string): Promise<void> {
+/** Partes (mensajes) de una sugerencia; las antiguas solo tienen `body`. */
+export function suggestionParts(suggestion: Pick<AgentSuggestion, "parts" | "body">): string[] {
+  const parts = Array.isArray(suggestion.parts)
+    ? suggestion.parts
+        .map((p) => (p && typeof p === "object" && !Array.isArray(p) && typeof p.text === "string" ? p.text : ""))
+        .filter(Boolean)
+    : [];
+  return parts.length ? parts : [suggestion.body];
+}
+
+/**
+ * Envía (tal cual o editada, `texts` = una por parte) o descarta una sugerencia.
+ * El envío va por el servidor, que manda las partes en orden.
+ */
+export async function resolveAgentSuggestion(id: string, action: "send" | "discard", texts?: string[]): Promise<void> {
   const response = await fetch(`/api/agents/suggestions/${id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, text }),
+    body: JSON.stringify({ action, texts }),
   });
   if (!response.ok) {
     const data = (await response.json().catch(() => ({}))) as { error?: string };

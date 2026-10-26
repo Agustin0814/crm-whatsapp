@@ -36,6 +36,10 @@ export async function sendAgentText(
     text: string;
     agentId: string;
     senderId: string | null;
+    /** Último mensaje del cliente que vio el modelo al generar (snapshot). */
+    answeredThrough: string | null;
+    /** Corrida que generó el mensaje: varias partes de una corrida cuentan como UNA respuesta seguida. */
+    runId: string | null;
   },
 ): Promise<{ messageId: string }> {
   const text = input.text.trim().slice(0, MAX_AGENT_TEXT);
@@ -60,6 +64,8 @@ export async function sendAgentText(
       wa_message_id: waMessageId,
       sent_by_agent: true,
       agent_id: input.agentId,
+      agent_answered_through: input.answeredThrough,
+      agent_run_id: input.runId,
     })
     .select("id")
     .single();

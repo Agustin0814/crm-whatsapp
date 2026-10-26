@@ -5,7 +5,12 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { fetchPendingAgentSuggestion, resolveAgentSuggestion, type AgentSuggestion } from "@/lib/agents/client";
+import {
+  fetchPendingAgentSuggestion,
+  resolveAgentSuggestion,
+  suggestionParts,
+  type AgentSuggestion,
+} from "@/lib/agents/client";
 import { createClient } from "@/lib/supabase/client";
 
 type Props = {
@@ -23,7 +28,8 @@ export function AgentSuggestionBanner({ conversationId, windowOpen }: Props) {
   const supabase = createClient();
   const [suggestion, setSuggestion] = useState<AgentSuggestion | null>(null);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  // Un borrador por parte (la sugerencia puede tener hasta 3 mensajes).
+  const [drafts, setDrafts] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -53,12 +59,13 @@ export function AgentSuggestionBanner({ conversationId, windowOpen }: Props) {
   }, [supabase, conversationId]);
 
   if (!suggestion || suggestion.conversation_id !== conversationId) return null;
+  const parts = suggestionParts(suggestion);
 
   async function resolve(action: "send" | "discard") {
     if (!suggestion) return;
     setBusy(true);
     try {
-      await resolveAgentSuggestion(suggestion.id, action, editing ? draft : undefined);
+      await resolveAgentSuggestion(suggestion.id, action, editing ? drafts : undefined);
       setSuggestion(null);
       setEditing(false);
       if (action === "discard") toast.success("Sugerencia descartada");
@@ -69,26 +76,32 @@ export function AgentSuggestionBanner({ conversationId, windowOpen }: Props) {
     }
   }
 
-  const canSend = windowOpen !== false && (!editing || draft.trim() !== "");
+  const canSend = windowOpen !== false && (!editing || drafts.some((d) => d.trim() !== ""));
 
   return (
     <div role="status" className="border-t bg-marca-suave px-4 py-3 text-sm">
       <div className="mx-auto max-w-3xl space-y-2">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-marca-texto">
           <BotIcon className="size-4" aria-hidden /> Sugerencia del asistente
+          {parts.length > 1 && <span className="font-normal">· {parts.length} mensajes, se envían en orden</span>}
         </p>
-        {editing ? (
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={3}
-            maxLength={4096}
-            aria-label="Editar la sugerencia"
-            autoFocus
-          />
-        ) : (
-          <p className="rounded-xl bg-background px-3 py-2 whitespace-pre-wrap">{suggestion.body}</p>
-        )}
+        {editing
+          ? drafts.map((d, i) => (
+              <Textarea
+                key={i}
+                value={d}
+                onChange={(e) => setDrafts((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))}
+                rows={parts.length > 1 ? 2 : 3}
+                maxLength={4096}
+                aria-label={parts.length > 1 ? `Editar el mensaje ${i + 1}` : "Editar la sugerencia"}
+                autoFocus={i === 0}
+              />
+            ))
+          : parts.map((text, i) => (
+              <p key={i} className="rounded-xl bg-background px-3 py-2 whitespace-pre-wrap">
+                {text}
+              </p>
+            ))}
         {windowOpen === false && (
           <p className="text-xs text-advertencia-texto">La ventana de 24 h está cerrada: ya no se puede enviar.</p>
         )}
@@ -105,7 +118,7 @@ export function AgentSuggestionBanner({ conversationId, windowOpen }: Props) {
               size="sm"
               variant="outline"
               onClick={() => {
-                setDraft(suggestion.body);
+                setDrafts(parts);
                 setEditing(true);
               }}
               disabled={busy}
