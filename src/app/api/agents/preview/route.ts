@@ -66,9 +66,10 @@ export async function POST(request: NextRequest) {
     : [];
 
   const admin = createAdminClient();
-  const { data: agent } = await admin.from("agents").select("config, agent_locked_config(*)").eq("key", agentKey).maybeSingle();
+  const { data: agent } = await admin.from("agents").select("kind, config, agent_locked_config(*)").eq("key", agentKey).maybeSingle();
   const locked = agent?.agent_locked_config;
-  if (!agent || !locked) return NextResponse.json({ error: "Agente no encontrado" }, { status: 404 });
+  // El probador simula respuestas: solo aplica al Asistente de respuestas.
+  if (!agent || !locked || agent.kind !== "responder") return NextResponse.json({ error: "Agente no encontrado" }, { status: 404 });
   const config = parseAgentConfig(agent.config, {
     ...DEFAULT_LIMITS,
     max_consecutive_max: locked.max_consecutive_ceiling,

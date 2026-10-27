@@ -4,7 +4,10 @@
 
 import type { Classification } from "@/lib/crm/types";
 
-export const AGENT_KEYS = { responder: "responder" } as const;
+export const AGENT_KEYS = { responder: "responder", notes: "notes" } as const;
+
+/** Tipo de agente (agents.kind): decide su motor, su panel y si tiene modo. */
+export type AgentKind = "responder" | "notes";
 
 /**
  * Descripción corta de cada agente en la lista de /agentes, por `agents.key`.
@@ -12,6 +15,7 @@ export const AGENT_KEYS = { responder: "responder" } as const;
  */
 export const AGENT_DESCRIPTIONS: Record<string, string> = {
   responder: "Responde mensajes de WhatsApp en el chat y puede usar tus respuestas rápidas.",
+  notes: "Deja notas internas y un resumen del cliente. Nunca escribe al cliente.",
 };
 export const DEFAULT_AGENT_DESCRIPTION = "Asistente de IA del chat.";
 
@@ -219,4 +223,5 @@ export const OUTCOME_LABELS: Record<string, string> = {
   handoff: "Transferido",
   error: "Error",
   blocked_by_limit: "Bloqueado por límite",
+  noted: "Anotado",
 };

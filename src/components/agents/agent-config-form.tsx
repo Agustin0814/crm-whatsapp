@@ -493,7 +493,7 @@ function Segmented<T extends string>({
 }
 
 /** Campo numérico acotado: recorta al salir del campo (la base vuelve a recortar). */
-function NumberField({
+export function NumberField({
   id,
   label,
   value,

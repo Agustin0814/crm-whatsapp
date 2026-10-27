@@ -1,6 +1,6 @@
 "use client";
 
-import { BellIcon, BotIcon, FlaskConicalIcon, Settings2Icon } from "lucide-react";
+import { BellIcon, BotIcon, FlaskConicalIcon, NotebookPenIcon, Settings2Icon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useCrm } from "@/components/crm/crm-provider";
@@ -51,14 +51,20 @@ import { cn } from "@/lib/utils";
 import { ActivityLog } from "./activity-log";
 import { AgentConfigForm } from "./agent-config-form";
 import { LockedConfigForm } from "./locked-config-form";
+import { NotesConfigForm } from "./notes-config-form";
 
 const numberFmt = new Intl.NumberFormat("es-MX");
 const usdFmt = new Intl.NumberFormat("es-MX", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 
-const EMPTY_USAGE: MonthlyUsage = { replies: 0, tokens: 0, costUsd: 0 };
+const EMPTY_USAGE: MonthlyUsage = { replies: 0, notePasses: 0, notesCreated: 0, tokens: 0, costUsd: 0 };
 
 function agentMode(agent: Agent): AgentMode {
   return agent.mode === "automatic" ? "automatic" : "suggestion";
+}
+
+/** El Asistente de notas no habla con el cliente: no tiene modo Sugerencia/Automático. */
+function isNotesAgent(agent: Agent): boolean {
+  return agent.kind === "notes";
 }
 
 /**
@@ -211,6 +217,7 @@ export function AgentsView() {
   const tokenCap = agents.reduce((sum, a) => sum + (limitsById[a.id]?.monthly_token_cap ?? 0), 0);
   const tokenPct = tokenCap > 0 ? Math.min(100, Math.round((usage.tokens / tokenCap) * 100)) : 0;
   const configAgent = agents.find((a) => a.id === configId) ?? null;
+  const hasNotesAgent = agents.some(isNotesAgent);
 
   const rowProps = (agent: Agent) => ({
     agent,
@@ -229,7 +236,11 @@ export function AgentsView() {
           {/* Uso del mes de todos los agentes */}
           {isAdmin && (
             <section className="grid gap-3 sm:grid-cols-3" aria-label="Uso del mes">
-              <Stat label="Respuestas del mes" value={numberFmt.format(usage.replies)} />
+              <Stat
+                label="Respuestas del mes"
+                value={numberFmt.format(usage.replies)}
+                hint={hasNotesAgent ? `${numberFmt.format(usage.notesCreated)} notas en ${numberFmt.format(usage.notePasses)} pasadas` : undefined}
+              />
               <div className="rounded-2xl border bg-card p-4">
                 <p className="text-xs text-texto-suave">Tokens del mes</p>
                 <p className="text-xl font-semibold tabular-nums">
@@ -373,22 +384,38 @@ export function AgentsView() {
                   lo que se editó en una NO se pierde al ir a la otra (antes Radix las
                   desmontaba y los cambios sin guardar desaparecían sin aviso). */}
               <TabsContent forceMount value="config" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-                <AgentConfigForm
-                  key={configAgent.updated_at}
-                  agent={configAgent}
-                  limits={limitsById[configAgent.id] ?? DEFAULT_LIMITS}
-                  canEdit={isAdmin}
-                  onDirtyChange={(d) => setDirty((prev) => (prev.config === d ? prev : { ...prev, config: d }))}
-                  onSaved={(saved) => {
-                    replaceAgent(saved);
-                    setReloadKey((k) => k + 1);
-                  }}
-                />
+                {isNotesAgent(configAgent) ? (
+                  <NotesConfigForm
+                    key={configAgent.updated_at}
+                    agent={configAgent}
+                    limits={limitsById[configAgent.id] ?? DEFAULT_LIMITS}
+                    canEdit={isAdmin}
+                    onDirtyChange={(d) => setDirty((prev) => (prev.config === d ? prev : { ...prev, config: d }))}
+                    onSaved={(saved) => {
+                      replaceAgent(saved);
+                      setReloadKey((k) => k + 1);
+                    }}
+                  />
+                ) : (
+                  <AgentConfigForm
+                    key={configAgent.updated_at}
+                    agent={configAgent}
+                    limits={limitsById[configAgent.id] ?? DEFAULT_LIMITS}
+                    canEdit={isAdmin}
+                    onDirtyChange={(d) => setDirty((prev) => (prev.config === d ? prev : { ...prev, config: d }))}
+                    onSaved={(saved) => {
+                      replaceAgent(saved);
+                      setReloadKey((k) => k + 1);
+                    }}
+                  />
+                )}
               </TabsContent>
               {isSuperadmin && (
                 <TabsContent forceMount value="locked" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
                   <LockedConfigForm
                     agentId={configAgent.id}
+                    agentKey={configAgent.key}
+                    kind={isNotesAgent(configAgent) ? "notes" : "responder"}
                     onDirtyChange={(d) => setDirty((prev) => (prev.locked === d ? prev : { ...prev, locked: d }))}
                     onSaved={() => setReloadKey((k) => k + 1)}
                   />
@@ -427,7 +454,7 @@ export function AgentsView() {
           <SheetContent side="right" className="w-full gap-0 sm:max-w-3xl">
             <SheetHeader className="border-b px-5 py-4">
               <SheetTitle className="text-lg">Registro de actividad</SheetTitle>
-              <SheetDescription>Últimas respuestas, sugerencias y transferencias de los agentes.</SheetDescription>
+              <SheetDescription>Últimas respuestas, sugerencias, transferencias y notas de los agentes.</SheetDescription>
             </SheetHeader>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {activityOpen && <ActivityLog agentIds={agents.map((a) => a.id)} agentNames={agentNames} refreshKey={reloadKey} />}
@@ -454,7 +481,7 @@ function AgentIdentity({ agent }: { agent: Agent }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
       <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-marca-suave text-marca-texto">
-        <BotIcon className="size-5" aria-hidden />
+        {isNotesAgent(agent) ? <NotebookPenIcon className="size-5" aria-hidden /> : <BotIcon className="size-5" aria-hidden />}
       </div>
       <div className="min-w-0">
         <p className="font-medium">{agent.name}</p>
@@ -485,6 +512,9 @@ function StatusControl({ agent, limits, canEdit, busy, onUpdate }: RowProps) {
 }
 
 function ModeControl({ agent, canEdit, busy, onUpdate }: RowProps) {
+  if (isNotesAgent(agent)) {
+    return <span className="text-sm text-texto-suave">Solo notas internas</span>;
+  }
   return (
     <ToggleGroup
       type="single"
@@ -519,11 +549,12 @@ function UnsavedDot() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-2xl border bg-card p-4">
       <p className="text-xs text-texto-suave">{label}</p>
       <p className="text-xl font-semibold tabular-nums">{value}</p>
+      {hint && <p className="mt-1 text-xs text-texto-suave tabular-nums">{hint}</p>}
     </div>
   );
 }

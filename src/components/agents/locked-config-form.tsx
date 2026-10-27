@@ -12,9 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchLockedConfig, saveLockedConfig, type AgentLockedConfig } from "@/lib/agents/client";
+import type { AgentKind } from "@/lib/agents/config";
 import { errorMessage } from "@/lib/crm/contacts";
 import { createClient } from "@/lib/supabase/client";
 import { ConfigSection } from "./config-section";
+import { NotesBackfill } from "./notes-backfill";
 
 const TOOLS = [
   { name: "enviar_respuesta_rapida", label: "Enviar respuesta rápida" },
@@ -62,6 +64,8 @@ const FIELD_LABELS: Partial<Record<keyof Values, string>> = {
   delay_seconds_max: "espera máxima",
   max_wait_seconds: "tope de espera total",
   monthly_alert_threshold_pct: "aviso del mes",
+  history_window_messages: "mensajes por pasada",
+  summary_max_chars: "largo del resumen",
   kill_switch: "kill switch",
 };
 
@@ -77,12 +81,17 @@ function changedKeys(a: Values, b: Values): (keyof Values)[] {
 
 type Props = {
   agentId: string;
+  /** Agente de respuestas o de notas: cambia las secciones que aplican. */
+  kind: AgentKind;
+  /** Clave del agente (acción «Procesar chats existentes» del de notas). */
+  agentKey: string;
   onSaved: () => void;
   /** Avisa al panel si hay cambios sin guardar (punto en la pestaña y aviso al cerrar). */
   onDirtyChange?: (dirty: boolean) => void;
 };
 
-export function LockedConfigForm({ agentId, onSaved, onDirtyChange }: Props) {
+export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChange }: Props) {
+  const isNotes = kind === "notes";
   const supabase = createClient();
   const { profiles } = useCrm();
   const [values, setValues] = useState<Values | null>(null);
@@ -140,7 +149,7 @@ export function LockedConfigForm({ agentId, onSaved, onDirtyChange }: Props) {
   async function save() {
     if (!values) return;
     if (values.delay_seconds_min > values.delay_seconds_max) {
-      setSaveError("La espera mínima no puede ser mayor que la máxima.");
+      setSaveError(isNotes ? "El silencio mínimo no puede ser mayor que el máximo." : "La espera mínima no puede ser mayor que la máxima.");
       return;
     }
     setSaving(true);
@@ -191,78 +200,118 @@ export function LockedConfigForm({ agentId, onSaved, onDirtyChange }: Props) {
           </div>
         </ConfigSection>
 
-        <ConfigSection title="Información del negocio" description="Única fuente de datos del asistente.">
-          <Textarea
-            rows={8}
-            maxLength={8000}
-            value={values.business_info}
-            onChange={(e) => set("business_info", e.target.value)}
-            placeholder="Qué hacen, productos y medidas, cobertura, horarios, ubicación, formas de pago…"
-            aria-label="Información del negocio"
-          />
-        </ConfigSection>
+        {!isNotes && (
+          <>
+            <ConfigSection title="Información del negocio" description="Única fuente de datos del asistente.">
+              <Textarea
+                rows={8}
+                maxLength={8000}
+                value={values.business_info}
+                onChange={(e) => set("business_info", e.target.value)}
+                placeholder="Qué hacen, productos y medidas, cobertura, horarios, ubicación, formas de pago…"
+                aria-label="Información del negocio"
+              />
+            </ConfigSection>
 
-        <ConfigSection title="Escalamiento y traspaso" description="Regla fija: pasa a una persona si el cliente lo pide o si no sabe.">
-          <div className="space-y-1.5">
-            <Label htmlFor="lk-topics">Temas que siempre pasan a una persona</Label>
-            <Input
-              id="lk-topics"
-              value={topicsText}
-              onChange={(e) => {
-                setTopicsText(e.target.value);
-                set(
-                  "escalation_topics",
-                  e.target.value
-                    .split(",")
-                    .map((t) => t.trim())
-                    .filter(Boolean),
-                );
-              }}
-              placeholder="queja, factura, garantía"
-            />
-            <p className="text-xs text-texto-suave">Separados por comas. Se detectan sin acentos ni mayúsculas.</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="lk-handoff">Mensaje de traspaso</Label>
-            <Textarea
-              id="lk-handoff"
-              rows={2}
-              maxLength={500}
-              value={values.handoff_message}
-              onChange={(e) => set("handoff_message", e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="lk-assign">Asignar a</Label>
-            <Select
-              value={values.handoff_assign_to ?? NO_ASSIGNEE}
-              onValueChange={(v) => set("handoff_assign_to", v === NO_ASSIGNEE ? null : v)}
-            >
-              <SelectTrigger id="lk-assign" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper">
-                <SelectItem value={NO_ASSIGNEE}>Nadie (solo pausar)</SelectItem>
-                {profiles.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {profileName(p)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </ConfigSection>
+            <ConfigSection title="Escalamiento y traspaso" description="Regla fija: pasa a una persona si el cliente lo pide o si no sabe.">
+              <div className="space-y-1.5">
+                <Label htmlFor="lk-topics">Temas que siempre pasan a una persona</Label>
+                <Input
+                  id="lk-topics"
+                  value={topicsText}
+                  onChange={(e) => {
+                    setTopicsText(e.target.value);
+                    set(
+                      "escalation_topics",
+                      e.target.value
+                        .split(",")
+                        .map((t) => t.trim())
+                        .filter(Boolean),
+                    );
+                  }}
+                  placeholder="queja, factura, garantía"
+                />
+                <p className="text-xs text-texto-suave">Separados por comas. Se detectan sin acentos ni mayúsculas.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lk-handoff">Mensaje de traspaso</Label>
+                <Textarea
+                  id="lk-handoff"
+                  rows={2}
+                  maxLength={500}
+                  value={values.handoff_message}
+                  onChange={(e) => set("handoff_message", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lk-assign">Asignar a</Label>
+                <Select
+                  value={values.handoff_assign_to ?? NO_ASSIGNEE}
+                  onValueChange={(v) => set("handoff_assign_to", v === NO_ASSIGNEE ? null : v)}
+                >
+                  <SelectTrigger id="lk-assign" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    <SelectItem value={NO_ASSIGNEE}>Nadie (solo pausar)</SelectItem>
+                    {profiles.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {profileName(p)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </ConfigSection>
+          </>
+        )}
+
+        {isNotes && (
+          <ConfigSection title="Resumen y ventana" description="Cuánto lee y cuánto escribe en cada pasada.">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <NumberInput
+                id="lk-window"
+                label="Mensajes por pasada (10–300)"
+                value={values.history_window_messages}
+                onChange={(v) => set("history_window_messages", v)}
+              />
+              <NumberInput
+                id="lk-summary"
+                label="Largo máximo del resumen (200–2000)"
+                value={values.summary_max_chars}
+                onChange={(v) => set("summary_max_chars", v)}
+              />
+            </div>
+            <p className="text-xs text-texto-suave">
+              Solo lee los mensajes posteriores a la última pasada; si hay más que la ventana, sigue por bloques.
+            </p>
+          </ConfigSection>
+        )}
 
         <ConfigSection
-          title="Espera y avisos"
-          description="Rango de espera del cliente. Cada mensaje nuevo reinicia la espera, sin pasar del tope total desde el primer mensaje sin responder."
+          title={isNotes ? "Silencio y avisos" : "Espera y avisos"}
+          description={
+            isNotes
+              ? "Rango de minutos de silencio del cliente (en segundos). Cada mensaje nuevo reinicia la espera, sin pasar del tope total."
+              : "Rango de espera del cliente. Cada mensaje nuevo reinicia la espera, sin pasar del tope total desde el primer mensaje sin responder."
+          }
         >
           <div className="grid gap-4 sm:grid-cols-2">
-            <NumberInput id="lk-dmin" label="Espera mínima (s)" value={values.delay_seconds_min} onChange={(v) => set("delay_seconds_min", v)} />
-            <NumberInput id="lk-dmax" label="Espera máxima (s, hasta 3600)" value={values.delay_seconds_max} onChange={(v) => set("delay_seconds_max", v)} />
+            <NumberInput
+              id="lk-dmin"
+              label={isNotes ? "Silencio mínimo (s, desde 60)" : "Espera mínima (s)"}
+              value={values.delay_seconds_min}
+              onChange={(v) => set("delay_seconds_min", v)}
+            />
+            <NumberInput
+              id="lk-dmax"
+              label={isNotes ? "Silencio máximo (s, hasta 86400)" : "Espera máxima (s, hasta 3600)"}
+              value={values.delay_seconds_max}
+              onChange={(v) => set("delay_seconds_max", v)}
+            />
             <NumberInput
               id="lk-maxwait"
-              label="Tope de espera total (s, 10–600)"
+              label={isNotes ? "Tope de espera total (s, 60–86400)" : "Tope de espera total (s, 10–600)"}
               value={values.max_wait_seconds}
               onChange={(v) => set("max_wait_seconds", v)}
             />
@@ -322,32 +371,43 @@ export function LockedConfigForm({ agentId, onSaved, onDirtyChange }: Props) {
               <p className="text-xs text-texto-suave">Vacía = la del modelo (los de razonamiento no la aceptan).</p>
             </div>
           </div>
-          <div className="space-y-2">
-            <Label>Herramientas permitidas</Label>
-            {TOOLS.map((t) => (
-              <label key={t.name} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={values.allowed_tools.includes(t.name)}
-                  onCheckedChange={(on) =>
-                    set("allowed_tools", on ? [...values.allowed_tools, t.name] : values.allowed_tools.filter((x) => x !== t.name))
-                  }
-                />
-                {t.label}
-              </label>
-            ))}
-          </div>
+          {!isNotes && (
+            <div className="space-y-2">
+              <Label>Herramientas permitidas</Label>
+              {TOOLS.map((t) => (
+                <label key={t.name} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={values.allowed_tools.includes(t.name)}
+                    onCheckedChange={(on) =>
+                      set("allowed_tools", on ? [...values.allowed_tools, t.name] : values.allowed_tools.filter((x) => x !== t.name))
+                    }
+                  />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+          )}
         </ConfigSection>
 
         <ConfigSection title="Techos y costos" description="El cliente no puede superar estos valores.">
           <div className="grid gap-4 sm:grid-cols-2">
-            <NumberInput id="lk-cons" label="Máx. respuestas seguidas (1–10)" value={values.max_consecutive_ceiling} onChange={(v) => set("max_consecutive_ceiling", v)} />
-            <NumberInput id="lk-daily" label="Tope diario máximo" value={values.daily_cap_ceiling} onChange={(v) => set("daily_cap_ceiling", v)} />
+            {!isNotes && (
+              <NumberInput id="lk-cons" label="Máx. respuestas seguidas (1–10)" value={values.max_consecutive_ceiling} onChange={(v) => set("max_consecutive_ceiling", v)} />
+            )}
+            <NumberInput
+              id="lk-daily"
+              label={isNotes ? "Máx. pasadas por día" : "Tope diario máximo"}
+              value={values.daily_cap_ceiling}
+              onChange={(v) => set("daily_cap_ceiling", v)}
+            />
             <NumberInput id="lk-month" label="Tope mensual de tokens" value={values.monthly_token_cap} onChange={(v) => set("monthly_token_cap", v)} />
-            <div />
+            {!isNotes && <div />}
             <NumberInput id="lk-in" label="USD por millón (entrada)" step="0.01" value={Number(values.input_price_per_mtok)} onChange={(v) => set("input_price_per_mtok", v)} />
             <NumberInput id="lk-out" label="USD por millón (salida)" step="0.01" value={Number(values.output_price_per_mtok)} onChange={(v) => set("output_price_per_mtok", v)} />
           </div>
         </ConfigSection>
+
+        {isNotes && <NotesBackfill agentKey={agentKey} />}
       </fieldset>
       <div className="space-y-2 border-t px-5 py-3">
         {saveError && (

@@ -5,6 +5,7 @@
 import type { createClient } from "@/lib/supabase/client";
 import type { Json, Tables } from "@/lib/supabase/database.types";
 import { DEFAULT_LIMITS, type AgentConfig, type AgentLimits, type AgentMode } from "./config";
+import type { NotesAgentConfig } from "./notes-config";
 
 type Client = ReturnType<typeof createClient>;
 
@@ -19,6 +20,9 @@ export type AgentUsageRow = Tables<"agent_usage_log"> & {
 /** Uso del mes actual sumado entre TODOS los agentes. */
 export type MonthlyUsage = {
   replies: number;
+  /** Pasadas del Asistente de notas y notas que dejó. */
+  notePasses: number;
+  notesCreated: number;
   tokens: number;
   costUsd: number;
 };
@@ -49,16 +53,18 @@ function currentMonthDate(now: Date = new Date()): string {
 export async function fetchMonthlyUsage(supabase: Client): Promise<MonthlyUsage> {
   const { data, error } = await supabase
     .from("agent_usage_monthly")
-    .select("replies, input_tokens, output_tokens, est_cost_usd")
+    .select("replies, note_passes, notes_created, input_tokens, output_tokens, est_cost_usd")
     .eq("month", currentMonthDate());
   if (error) throw error;
   return (data ?? []).reduce<MonthlyUsage>(
     (acc, row) => ({
       replies: acc.replies + (Number(row.replies) || 0),
+      notePasses: acc.notePasses + (Number(row.note_passes) || 0),
+      notesCreated: acc.notesCreated + (Number(row.notes_created) || 0),
       tokens: acc.tokens + (Number(row.input_tokens) || 0) + (Number(row.output_tokens) || 0),
       costUsd: acc.costUsd + (Number(row.est_cost_usd) || 0),
     }),
-    { replies: 0, tokens: 0, costUsd: 0 },
+    { replies: 0, notePasses: 0, notesCreated: 0, tokens: 0, costUsd: 0 },
   );
 }
 
@@ -72,7 +78,7 @@ export async function fetchAgentLimits(supabase: Client, key: string): Promise<A
 export async function saveAgentSettings(
   supabase: Client,
   key: string,
-  changes: { enabled?: boolean; mode?: AgentMode; config?: AgentConfig },
+  changes: { enabled?: boolean; mode?: AgentMode; config?: AgentConfig | NotesAgentConfig },
 ): Promise<Agent> {
   // null = «no cambiar» (la función usa coalesce); los tipos generados no lo reflejan.
   const { data, error } = await supabase.rpc("update_agent_settings", {
@@ -182,4 +188,43 @@ export async function resolveAgentSuggestion(id: string, action: "send" | "disca
 export async function setAgentPaused(supabase: Client, conversationId: string, paused: boolean): Promise<void> {
   const { error } = await supabase.rpc("set_agent_paused", { p_conversation_id: conversationId, p_paused: paused });
   if (error) throw error;
+}
+
+// --- Asistente de notas -----------------------------------------------------------
+
+export type ContactSummaryRow = Tables<"contact_summaries">;
+
+/** Resumen del contacto (lectura para todo el personal, igual que contactos). */
+export async function fetchContactSummary(supabase: Client, contactId: string): Promise<ContactSummaryRow | null> {
+  const { data, error } = await supabase.from("contact_summaries").select("*").eq("contact_id", contactId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/** Edición del resumen por una persona: la base marca quién y cuándo. */
+export async function saveContactSummary(supabase: Client, contactId: string, summary: string): Promise<ContactSummaryRow> {
+  const { data, error } = await supabase.rpc("update_contact_summary", { p_contact_id: contactId, p_summary: summary });
+  if (error) throw error;
+  return data as ContactSummaryRow;
+}
+
+export type BackfillStatus = { chats_pending: number; queued: number };
+
+/** «Procesar chats existentes» (solo superadmin; la base lo valida). */
+export async function fetchBackfillStatus(supabase: Client, agentKey: string): Promise<BackfillStatus> {
+  const { data, error } = await supabase.rpc("notes_backfill_status", { p_agent_key: agentKey });
+  if (error) throw error;
+  return data as unknown as BackfillStatus;
+}
+
+export async function startBackfill(supabase: Client, agentKey: string): Promise<{ found: number; queued: number }> {
+  const { data, error } = await supabase.rpc("enqueue_notes_backfill", { p_agent_key: agentKey });
+  if (error) throw error;
+  return data as unknown as { found: number; queued: number };
+}
+
+export async function cancelBackfill(supabase: Client, agentKey: string): Promise<number> {
+  const { data, error } = await supabase.rpc("cancel_notes_backfill", { p_agent_key: agentKey });
+  if (error) throw error;
+  return data;
 }

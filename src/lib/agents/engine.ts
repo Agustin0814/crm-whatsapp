@@ -1,12 +1,10 @@
 import "server-only";
 import { isWindowOpen } from "@/lib/conversation-window";
 import { applyTemplate } from "@/lib/crm/templates";
-import type { createAdminClient } from "@/lib/supabase/admin";
 import type { Json, Tables } from "@/lib/supabase/database.types";
 import { WhatsAppApiError } from "@/lib/whatsapp/send";
 import { DEFAULT_LIMITS, isQuickReplyUsable, parseAgentConfig, type AgentConfig, type AgentLimits } from "./config";
 import {
-  AGENT_TIME_ZONE,
   currentBurst,
   estimateCostUsd,
   isScheduleActive,
@@ -35,12 +33,13 @@ import {
   type CoverageEntry,
   type PlanValidation,
 } from "./reply-plan";
+import { executeNotesRun, scheduleNotesForHandoff, scheduleNotesForInbound } from "./notes-engine";
 import { AgentSendError, sendAgentText } from "./send";
+import { alertOnce, describe, periodStarts, type AdminClient } from "./shared";
 
 // Motor común de los agentes. Todo límite y regla de seguridad se aplica aquí
 // (servidor, cliente admin). Cada decisión queda en agent_usage_log.
 
-type AdminClient = ReturnType<typeof createAdminClient>;
 type Run = Tables<"agent_scheduled_runs">;
 type Locked = Tables<"agent_locked_config">;
 type Outcome = "sent" | "suggested" | "skipped" | "handoff" | "error" | "blocked_by_limit";
@@ -60,24 +59,6 @@ export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(r
 export type ReplyPart = { text: string; quickReplyId: string | null };
 
 // ---------------------------------------------------------------------------
-// Fechas en la zona del negocio
-// ---------------------------------------------------------------------------
-
-/**
- * Inicio del día y del mes en America/Hermosillo. Sonora no tiene horario de
- * verano (UTC−7 todo el año), así que el desfase es fijo.
- */
-function periodStarts(now: Date = new Date()): { day: string; month: string; monthDate: string } {
-  const local = new Intl.DateTimeFormat("en-CA", { timeZone: AGENT_TIME_ZONE }).format(now); // AAAA-MM-DD
-  const monthDate = `${local.slice(0, 7)}-01`;
-  return {
-    day: new Date(`${local}T00:00:00-07:00`).toISOString(),
-    month: new Date(`${monthDate}T00:00:00-07:00`).toISOString(),
-    monthDate,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Programación (desde el webhook): espera por inactividad
 // ---------------------------------------------------------------------------
 
@@ -94,12 +75,20 @@ export async function scheduleAgentsForInbound(
   input: { conversationId: string; messageId: string },
 ): Promise<boolean> {
   try {
-    const { data: agents, error } = await supabase
+    const { data: all, error } = await supabase
       .from("agents")
-      .select("id, config, agent_locked_config(kill_switch, delay_seconds_min, delay_seconds_max, max_wait_seconds)")
+      .select("id, kind, config, agent_locked_config(kill_switch, delay_seconds_min, delay_seconds_max, max_wait_seconds, daily_cap_ceiling)")
       .eq("enabled", true);
-    if (error || !agents?.length) return false;
+    if (error || !all?.length) return false;
 
+    // Asistente de notas: no depende de la pausa del chat (anota también chats
+    // atendidos por personas). Su espera es de minutos: nunca es inmediata.
+    for (const agent of all.filter((a) => a.kind === "notes")) {
+      await scheduleNotesForInbound(supabase, agent, input);
+    }
+
+    const agents = all.filter((a) => a.kind === "responder");
+    if (!agents.length) return false;
     const { data: conversation } = await supabase
       .from("conversations")
       .select("agent_paused")
@@ -169,27 +158,50 @@ async function scheduleRun(
 export async function processDueRuns(supabase: AdminClient, limit = 10): Promise<{ processed: number }> {
   const { data: runs, error } = await supabase.rpc("claim_agent_runs", { p_limit: limit });
   if (error) throw new Error(`No se pudieron tomar las corridas: ${error.message}`);
+  if (!runs?.length) return { processed: 0 };
 
-  for (const run of runs ?? []) {
-    let status: "done" | "skipped" = "skipped";
-    let reason = "Sin acción";
-    try {
-      const result = await executeRun(supabase, run);
-      status = result.acted ? "done" : "skipped";
-      reason = result.reason;
-    } catch (error) {
-      status = "done";
-      reason = "Error inesperado";
-      console.error(`[agents] Error en la corrida ${run.id}: ${describe(error)}`);
-      await logUsage(supabase, { run, outcome: "error", reason: "Error inesperado", usage: NO_USAGE });
+  // Cada corrida se ejecuta con el motor de su tipo de agente.
+  const { data: kinds } = await supabase.from("agents").select("id, kind").in("id", [...new Set(runs.map((r) => r.agent_id))]);
+  const kindOf = new Map((kinds ?? []).map((a) => [a.id, a.kind]));
+  const notesRuns = runs.filter((r) => kindOf.get(r.agent_id) === "notes");
+  const replyRuns = runs.filter((r) => kindOf.get(r.agent_id) !== "notes");
+
+  // Las respuestas, en orden como siempre; las pasadas de notas (chats
+  // distintos, sin envíos) en paralelo, de pocas en pocas.
+  const replies = (async () => {
+    for (const run of replyRuns) await finishRun(supabase, run, () => executeRun(supabase, run));
+  })();
+  const notes = (async () => {
+    for (let i = 0; i < notesRuns.length; i += NOTES_CONCURRENCY) {
+      await Promise.all(notesRuns.slice(i, i + NOTES_CONCURRENCY).map((run) => finishRun(supabase, run, () => executeNotesRun(supabase, run))));
     }
-    await supabase
-      .from("agent_scheduled_runs")
-      .update({ status, reason, updated_at: new Date().toISOString() })
-      .eq("id", run.id)
-      .eq("status", "running");
+  })();
+  await Promise.all([replies, notes]);
+  return { processed: runs.length };
+}
+
+/** Pasadas de notas simultáneas en un mismo tick. */
+const NOTES_CONCURRENCY = 4;
+
+/** Ejecuta una corrida y la cierra (de `running` a `done`/`skipped`). */
+async function finishRun(supabase: AdminClient, run: Run, execute: () => Promise<RunResult>): Promise<void> {
+  let status: "done" | "skipped" = "skipped";
+  let reason = "Sin acción";
+  try {
+    const result = await execute();
+    status = result.acted ? "done" : "skipped";
+    reason = result.reason;
+  } catch (error) {
+    status = "done";
+    reason = "Error inesperado";
+    console.error(`[agents] Error en la corrida ${run.id}: ${describe(error)}`);
+    await logUsage(supabase, { run, outcome: "error", reason: "Error inesperado", usage: NO_USAGE });
   }
-  return { processed: runs?.length ?? 0 };
+  await supabase
+    .from("agent_scheduled_runs")
+    .update({ status, reason, updated_at: new Date().toISOString() })
+    .eq("id", run.id)
+    .eq("status", "running");
 }
 
 // ---------------------------------------------------------------------------
@@ -729,6 +741,8 @@ async function handoff(
       message: `${config.display_name} pasó a una persona la conversación con ${name}: ${reason}`,
     });
   }
+  // El Asistente de notas deja el contexto para la persona que recibe el chat.
+  await scheduleNotesForHandoff(supabase, ctx.conversation.id);
   return { ...result, reason };
 }
 
@@ -787,29 +801,4 @@ async function logUsage(
     retried: input.retried ?? false,
   });
   if (error) console.error(`[agents] No se pudo registrar el uso: ${error.message}`);
-}
-
-/** Crea una alerta de este tipo solo si no hay otra desde `since`. */
-async function alertOnce(
-  supabase: AdminClient,
-  agentId: string,
-  kind: "daily_cap" | "token_cap" | "monthly_threshold" | "error",
-  audience: "admin" | "superadmin",
-  since: string,
-  message: string,
-): Promise<void> {
-  const { count } = await supabase
-    .from("agent_alerts")
-    .select("id", { count: "exact", head: true })
-    .eq("agent_id", agentId)
-    .eq("kind", kind)
-    .gte("created_at", since);
-  if ((count ?? 0) > 0) return;
-  await supabase.from("agent_alerts").insert({ agent_id: agentId, kind, audience, message });
-}
-
-function describe(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) return String((error as { message: unknown }).message);
-  return "desconocido";
 }

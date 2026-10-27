@@ -235,7 +235,7 @@ export function ChatView({
         />
       </div>
       <div className={cn("min-h-0 flex-1 flex-col", showNotes ? "flex" : "hidden")}>
-        <NotesPanel conversationId={conversation.id} />
+        <NotesPanel conversationId={conversation.id} contactId={conversation.contact_id} />
       </div>
 
     </div>

@@ -76,6 +76,7 @@ export type Database = {
           escalation_topics: string[]
           handoff_assign_to: string | null
           handoff_message: string
+          history_window_messages: number
           input_price_per_mtok: number
           kill_switch: boolean
           max_consecutive_ceiling: number
@@ -87,6 +88,7 @@ export type Database = {
           output_price_per_mtok: number
           reasoning_effort: string
           safety_rules: string
+          summary_max_chars: number
           system_prompt: string
           temperature: number | null
           updated_at: string
@@ -103,6 +105,7 @@ export type Database = {
           escalation_topics?: string[]
           handoff_assign_to?: string | null
           handoff_message?: string
+          history_window_messages?: number
           input_price_per_mtok?: number
           kill_switch?: boolean
           max_consecutive_ceiling?: number
@@ -114,6 +117,7 @@ export type Database = {
           output_price_per_mtok?: number
           reasoning_effort?: string
           safety_rules?: string
+          summary_max_chars?: number
           system_prompt?: string
           temperature?: number | null
           updated_at?: string
@@ -130,6 +134,7 @@ export type Database = {
           escalation_topics?: string[]
           handoff_assign_to?: string | null
           handoff_message?: string
+          history_window_messages?: number
           input_price_per_mtok?: number
           kill_switch?: boolean
           max_consecutive_ceiling?: number
@@ -141,6 +146,7 @@ export type Database = {
           output_price_per_mtok?: number
           reasoning_effort?: string
           safety_rules?: string
+          summary_max_chars?: number
           system_prompt?: string
           temperature?: number | null
           updated_at?: string
@@ -183,6 +189,7 @@ export type Database = {
           seen_inbound_at: string | null
           seen_message_id: string | null
           status: string
+          trigger_kind: string
           trigger_message_id: string | null
           updated_at: string
         }
@@ -198,6 +205,7 @@ export type Database = {
           seen_inbound_at?: string | null
           seen_message_id?: string | null
           status?: string
+          trigger_kind?: string
           trigger_message_id?: string | null
           updated_at?: string
         }
@@ -213,6 +221,7 @@ export type Database = {
           seen_inbound_at?: string | null
           seen_message_id?: string | null
           status?: string
+          trigger_kind?: string
           trigger_message_id?: string | null
           updated_at?: string
         }
@@ -352,11 +361,13 @@ export type Database = {
           message_id: string | null
           messages_count: number
           model: string | null
+          notes_created: number
           outcome: string
           output_tokens: number
           reason: string | null
           retried: boolean
           run_id: string | null
+          summary_updated: boolean
         }
         Insert: {
           agent_id: string
@@ -371,11 +382,13 @@ export type Database = {
           message_id?: string | null
           messages_count?: number
           model?: string | null
+          notes_created?: number
           outcome: string
           output_tokens?: number
           reason?: string | null
           retried?: boolean
           run_id?: string | null
+          summary_updated?: boolean
         }
         Update: {
           agent_id?: string
@@ -390,11 +403,13 @@ export type Database = {
           message_id?: string | null
           messages_count?: number
           model?: string | null
+          notes_created?: number
           outcome?: string
           output_tokens?: number
           reason?: string | null
           retried?: boolean
           run_id?: string | null
+          summary_updated?: boolean
         }
         Relationships: [
           {
@@ -433,6 +448,7 @@ export type Database = {
           enabled: boolean
           id: string
           key: string
+          kind: string
           mode: string
           name: string
           updated_at: string
@@ -443,6 +459,7 @@ export type Database = {
           enabled?: boolean
           id?: string
           key: string
+          kind?: string
           mode?: string
           name: string
           updated_at?: string
@@ -453,6 +470,7 @@ export type Database = {
           enabled?: boolean
           id?: string
           key?: string
+          kind?: string
           mode?: string
           name?: string
           updated_at?: string
@@ -762,6 +780,77 @@ export type Database = {
           sort_order?: number
         }
         Relationships: []
+      }
+      contact_summaries: {
+        Row: {
+          agent_id: string | null
+          contact_id: string
+          counters: Json
+          created_at: string
+          edited_by: string | null
+          edited_by_user_at: string | null
+          last_processed_at: string | null
+          last_processed_message_id: string | null
+          summary: string
+          updated_at: string
+          updated_by_agent_at: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          contact_id: string
+          counters?: Json
+          created_at?: string
+          edited_by?: string | null
+          edited_by_user_at?: string | null
+          last_processed_at?: string | null
+          last_processed_message_id?: string | null
+          summary?: string
+          updated_at?: string
+          updated_by_agent_at?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          contact_id?: string
+          counters?: Json
+          created_at?: string
+          edited_by?: string | null
+          edited_by_user_at?: string | null
+          last_processed_at?: string | null
+          last_processed_message_id?: string | null
+          summary?: string
+          updated_at?: string
+          updated_by_agent_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_summaries_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_summaries_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: true
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_summaries_edited_by_fkey"
+            columns: ["edited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_summaries_last_processed_message_id_fkey"
+            columns: ["last_processed_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       contact_tags: {
         Row: {
@@ -1200,27 +1289,49 @@ export type Database = {
       }
       notes: {
         Row: {
+          agent_id: string | null
+          agent_label: string | null
           author_id: string | null
           body: string
           conversation_id: string
           created_at: string
+          dedupe_key: string | null
           id: string
+          run_id: string | null
+          updated_at: string
         }
         Insert: {
+          agent_id?: string | null
+          agent_label?: string | null
           author_id?: string | null
           body: string
           conversation_id: string
           created_at?: string
+          dedupe_key?: string | null
           id?: string
+          run_id?: string | null
+          updated_at?: string
         }
         Update: {
+          agent_id?: string | null
+          agent_label?: string | null
           author_id?: string | null
           body?: string
           conversation_id?: string
           created_at?: string
+          dedupe_key?: string | null
           id?: string
+          run_id?: string | null
+          updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "notes_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "notes_author_id_fkey"
             columns: ["author_id"]
@@ -1233,6 +1344,13 @@ export type Database = {
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "agent_scheduled_runs"
             referencedColumns: ["id"]
           },
         ]
@@ -1657,6 +1775,8 @@ export type Database = {
           est_cost_usd: number | null
           input_tokens: number | null
           month: string | null
+          note_passes: number | null
+          notes_created: number | null
           output_tokens: number | null
           replies: number | null
         }
@@ -1723,11 +1843,16 @@ export type Database = {
       add_internal_note: {
         Args: { p_body: string; p_conversation_id: string }
         Returns: {
+          agent_id: string | null
+          agent_label: string | null
           author_id: string | null
           body: string
           conversation_id: string
           created_at: string
+          dedupe_key: string | null
           id: string
+          run_id: string | null
+          updated_at: string
         }
         SetofOptions: {
           from: "*"
@@ -1784,6 +1909,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      cancel_notes_backfill: { Args: { p_agent_key: string }; Returns: number }
       claim_agent_runs: {
         Args: { p_limit?: number }
         Returns: {
@@ -1798,6 +1924,7 @@ export type Database = {
           seen_inbound_at: string | null
           seen_message_id: string | null
           status: string
+          trigger_kind: string
           trigger_message_id: string | null
           updated_at: string
         }[]
@@ -1884,6 +2011,7 @@ export type Database = {
         Returns: Json
       }
       delete_entity_note: { Args: { p_note_id: string }; Returns: undefined }
+      enqueue_notes_backfill: { Args: { p_agent_key: string }; Returns: Json }
       find_phone_matches: {
         Args: {
           p_exclude_id?: string
@@ -1908,6 +2036,7 @@ export type Database = {
         Returns: string
       }
       normalize_phone: { Args: { p: string }; Returns: string }
+      notes_backfill_status: { Args: { p_agent_key: string }; Returns: Json }
       register_purchase: {
         Args: {
           p_date?: string
@@ -1938,6 +2067,23 @@ export type Database = {
         Args: { p_accept: boolean; p_id: string }
         Returns: undefined
       }
+      save_notes_pass: {
+        Args: {
+          p_agent_id: string
+          p_agent_label: string
+          p_contact_id: string
+          p_conversation_id: string
+          p_counters: Json
+          p_expected_updated_at: string
+          p_last_message_at: string
+          p_last_message_id: string
+          p_notes: Json
+          p_run_id: string
+          p_summary: string
+          p_summary_changed: boolean
+        }
+        Returns: Json
+      }
       schedule_agent_run: {
         Args: {
           p_agent_id: string
@@ -1945,6 +2091,18 @@ export type Database = {
           p_delay_seconds: number
           p_max_wait_seconds: number
           p_message_id: string
+        }
+        Returns: string
+      }
+      schedule_notes_run: {
+        Args: {
+          p_agent_id: string
+          p_conversation_id: string
+          p_delay_seconds: number
+          p_max_wait_seconds: number
+          p_message_id: string
+          p_run_at?: string
+          p_trigger?: string
         }
         Returns: string
       }
@@ -2071,6 +2229,7 @@ export type Database = {
           enabled: boolean
           id: string
           key: string
+          kind: string
           mode: string
           name: string
           updated_at: string
@@ -2079,6 +2238,28 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "agents"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_contact_summary: {
+        Args: { p_contact_id: string; p_summary: string }
+        Returns: {
+          agent_id: string | null
+          contact_id: string
+          counters: Json
+          created_at: string
+          edited_by: string | null
+          edited_by_user_at: string | null
+          last_processed_at: string | null
+          last_processed_message_id: string | null
+          summary: string
+          updated_at: string
+          updated_by_agent_at: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "contact_summaries"
           isOneToOne: true
           isSetofReturn: false
         }

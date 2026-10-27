@@ -1,7 +1,7 @@
 "use client";
 
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { LockIcon, Trash2Icon } from "lucide-react";
+import { BotIcon, LockIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { Icon } from "@/components/ui/icon";
 import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { toast } from "sonner";
@@ -14,16 +14,23 @@ import { errorMessage } from "@/lib/crm/contacts";
 import type { NoteWithAuthor } from "@/lib/crm/types";
 import { formatDateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
+import { ContactSummaryCard } from "./contact-summary-card";
+import { useAgentNames } from "./use-agent-names";
 
 const NOTE_SELECT = "*, author:profiles(id, full_name)" as const;
 
 /**
  * Notas internas de la conversación (tabla notes). Solo las ve el equipo:
- * se guardan en la base y NUNCA pasan por la API de WhatsApp.
+ * se guardan en la base y NUNCA pasan por la API de WhatsApp. Arriba, fijo, el
+ * resumen del cliente. Las notas del Asistente de notas llevan su nombre y un
+ * icono de bot; cualquiera puede borrarlas, nadie las edita.
  */
-export function NotesPanel({ conversationId }: { conversationId: string }) {
+export function NotesPanel({ conversationId, contactId }: { conversationId: string; contactId: string }) {
   const supabase = createClient();
   const { me, isAdmin } = useCrm();
+  const agentName = useAgentNames();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const [notes, setNotes] = useState<NoteWithAuthor[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
@@ -108,6 +115,19 @@ export function NotesPanel({ conversationId }: { conversationId: string }) {
     }
   }
 
+  async function saveEdit(id: string) {
+    const body = editDraft.trim();
+    if (!body) return;
+    const previous = notes;
+    setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, body } : n)));
+    setEditingId(null);
+    const { error } = await supabase.from("notes").update({ body }).eq("id", id);
+    if (error) {
+      setNotes(previous);
+      toast.error(errorMessage(error, "No se pudo editar la nota"));
+    }
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void addNote();
@@ -124,6 +144,10 @@ export function NotesPanel({ conversationId }: { conversationId: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto bg-background px-3 py-4 md:px-6">
         <div className="mx-auto flex max-w-3xl flex-col gap-3">
+          <div className="sticky top-0 z-10 -mx-1 bg-background px-1 pb-1">
+            <ContactSummaryCard contactId={contactId} />
+          </div>
+
           {loading && [0, 1].map((i) => <Skeleton key={i} className="h-20 rounded-lg" />)}
 
           {!loading && notes.length === 0 && (
@@ -135,28 +159,81 @@ export function NotesPanel({ conversationId }: { conversationId: string }) {
           )}
 
           {notes.map((note) => {
-            const canDelete = isAdmin || note.author_id === me?.id;
+            const byAgent = note.agent_id !== null || note.agent_label !== null;
+            const mine = !byAgent && note.author_id === me?.id;
+            const canDelete = byAgent || mine || isAdmin;
+            const editing = editingId === note.id;
             return (
               <article key={note.id} className="group rounded-lg border border-nota-borde bg-nota p-3 text-nota-texto">
                 <header className="mb-1 flex items-center gap-2 text-xs">
-                  <Icon name="notas" className="size-3.5" />
-                  <span className="font-semibold">{profileName(note.author)}</span>
+                  {byAgent ? (
+                    <BotIcon className="size-3.5" aria-label="Asistente de IA" />
+                  ) : (
+                    <Icon name="notas" className="size-3.5" />
+                  )}
+                  <span className="font-semibold">
+                    {byAgent ? (note.agent_id ? agentName(note.agent_id) : note.agent_label) : profileName(note.author)}
+                  </span>
                   <time dateTime={note.created_at} className="opacity-80">
                     {formatDateTime(note.created_at)}
                   </time>
-                  {canDelete && (
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      className="ml-auto text-nota-texto opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                      onClick={() => void deleteNote(note.id)}
-                      aria-label="Eliminar nota"
-                    >
-                      <Trash2Icon />
-                    </Button>
-                  )}
+                  <span className="ml-auto flex items-center gap-0.5">
+                    {mine && !editing && (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-nota-texto opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        onClick={() => {
+                          setEditDraft(note.body);
+                          setEditingId(note.id);
+                        }}
+                        aria-label="Editar nota"
+                      >
+                        <PencilIcon />
+                      </Button>
+                    )}
+                    {canDelete && (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-nota-texto opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        onClick={() => void deleteNote(note.id)}
+                        aria-label="Eliminar nota"
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    )}
+                  </span>
                 </header>
-                <p className="text-sm break-words whitespace-pre-wrap">{note.body}</p>
+                {editing ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={editDraft}
+                      onChange={(e) => setEditDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                          e.preventDefault();
+                          void saveEdit(note.id);
+                        }
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      rows={2}
+                      autoFocus
+                      className="max-h-40 resize-none bg-background"
+                      aria-label="Editar nota"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                        Cancelar
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => void saveEdit(note.id)} disabled={!editDraft.trim()}>
+                        Guardar
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm break-words whitespace-pre-wrap">{note.body}</p>
+                )}
               </article>
             );
           })}
