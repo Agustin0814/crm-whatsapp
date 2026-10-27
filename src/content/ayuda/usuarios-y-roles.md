@@ -1,6 +1,6 @@
 ---
 titulo: Usuarios y roles
-temas: usuarios, roles, vendedor, repartidor, administrador, proveedor, permisos, invitar usuario, invitación, desactivar, reactivar, puesto, mi perfil, avatar, contraseña, olvidé mi contraseña, recuperar contraseña
+temas: usuarios, roles, vendedor, repartidor, administrador, proveedor, permisos, invitar usuario, invitación, desactivar, reactivar, puesto, mi perfil, avatar, contraseña, olvidé mi contraseña, recuperar contraseña, código, código de 6 dígitos, activar cuenta
 ---
 Hay cuatro roles:
 
@@ -12,7 +12,7 @@ Hay cuatro roles:
 ## Administrar usuarios
 En Configuración → **Usuarios** (solo administradores):
 
-- **Invitar usuario:** escribe el correo, el nombre, el rol y, si quieres, el puesto (solo informativo). Le llega un correo con un enlace para crear su contraseña. Si no le llegó, en el menú **…** de su fila está **Reenviar invitación**.
+- **Invitar usuario:** escribe el correo, el nombre, el rol y, si quieres, el puesto (solo informativo). Le llega un correo con un **código de 6 dígitos** y la dirección de la página **Activa tu cuenta**. Ahí escribe su correo y el código y crea su contraseña. Si no le llegó o venció (dura unos 15 minutos), en el menú **…** de su fila está **Reenviar invitación**.
 - **Cambiar rol:** con el selector de su fila (Vendedor, Repartidor o Administrador).
 - **Cambiar puesto:** en el menú **…** de su fila.
 - **Desactivar / Reactivar:** en el menú **…**. Al desactivar se cierra su sesión en todos sus dispositivos y ya no puede entrar; sus mensajes, notas e historial se conservan. Nunca se borran usuarios.
@@ -22,4 +22,10 @@ En Configuración → **Usuarios** (solo administradores):
 En el menú de tu usuario (abajo en la barra lateral) → **Mi perfil**: cambia tu nombre, el color o el emoji de tu avatar y tu contraseña (mínimo 8 caracteres, con al menos una letra y un número). El rol y el puesto los cambia un administrador.
 
 ## Olvidé mi contraseña
-En la pantalla de inicio de sesión, pulsa **¿La olvidaste?**, escribe tu correo y abre el enlace que te llega. Ahí escribes y confirmas tu contraseña nueva. Si el enlace venció, pide uno nuevo. Una cuenta desactivada no puede entrar aunque cambie la contraseña.
+En la pantalla de inicio de sesión, pulsa **¿La olvidaste?**:
+
+1. Escribe tu correo y pulsa **Enviar código**. Siempre verás el mismo mensaje, exista o no la cuenta.
+2. Escribe (o pega) el **código de 6 dígitos** que te llegó por correo. Vence en unos 15 minutos. Si no llegó, revisa el spam o pulsa **Reenviar código** (se puede cada 60 segundos).
+3. Escribe tu contraseña nueva dos veces (el ojo la muestra u oculta) y pulsa **Guardar**. Entras directo y se cierran tus sesiones en otros dispositivos.
+
+Si te equivocas de código 5 veces, tienes que esperar 15 minutos. Los correos ya no traen enlaces: si abres un enlace de un correo anterior, la página te pide un código nuevo. Una cuenta desactivada no puede recuperar la contraseña ni activarse.

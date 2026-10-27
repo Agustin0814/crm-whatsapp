@@ -5,8 +5,16 @@ import type { Database } from "@/lib/supabase/database.types";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/supabase/public-env";
 
 /** Rutas accesibles sin sesión. */
-const PUBLIC_PATHS = ["/login", "/olvide-contrasena", "/auth/confirm"];
-/** Accesibles con o sin sesión (el enlace del correo puede traer la sesión en el #hash). */
+const PUBLIC_PATHS = [
+  "/login",
+  "/olvide-contrasena",
+  // Código de 6 dígitos: se pide y se verifica sin sesión (límites en la base).
+  "/api/auth/send-code",
+  "/api/auth/verify-code",
+  // Solo redirige los enlaces de correos anteriores a la pantalla del código.
+  "/auth/confirm",
+];
+/** Accesibles con o sin sesión (activar cuenta invitada). */
 const OPEN_PATHS = ["/definir-contrasena"];
 
 /**

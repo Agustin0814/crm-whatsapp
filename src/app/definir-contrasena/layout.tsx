@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-export const metadata: Metadata = { title: "Definir contraseña" };
+export const metadata: Metadata = { title: "Activar cuenta" };
 
 export default function Layout({ children }: { children: ReactNode }) {
   return children;

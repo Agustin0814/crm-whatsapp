@@ -84,8 +84,9 @@ export async function GET() {
 }
 
 /**
- * Invita por correo (o reenvía la invitación) con rol y puesto. El enlace
- * lleva a /auth/confirm → /definir-contrasena.
+ * Invita por correo (o reenvía la invitación) con rol y puesto. El correo
+ * (plantilla «Invite user») lleva un código de 6 dígitos ({{ .Token }}) y la
+ * dirección de /definir-contrasena, donde se activa la cuenta.
  */
 export async function POST(request: NextRequest) {
   const check = await requireAdmin();
@@ -101,9 +102,7 @@ export async function POST(request: NextRequest) {
   if (!isAssignableRole(role)) return deny(400, "Rol no válido");
 
   const admin = createAdminClient();
-  const redirectTo = `${request.nextUrl.origin}/auth/confirm?next=/definir-contrasena`;
   const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-    redirectTo,
     data: { full_name: fullName || email },
   });
   if (error || !data.user) {

@@ -42,7 +42,6 @@ function LoginForm() {
     searchParams.get("motivo") === "inactivo" ? INACTIVE_MESSAGE : null,
   );
   const [loading, setLoading] = useState(false);
-  const passwordUpdated = searchParams.get("clave") === "actualizada";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -82,7 +81,6 @@ function LoginForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {passwordUpdated && !error && <AuthNotice tone="success">Contraseña guardada. Ya puedes entrar.</AuthNotice>}
       <div className="space-y-2">
         <Label htmlFor="email">Correo</Label>
         <Input

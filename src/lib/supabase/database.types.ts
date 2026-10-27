@@ -749,6 +749,36 @@ export type Database = {
           },
         ]
       }
+      auth_code_limits: {
+        Row: {
+          failed_attempts: number
+          key: string
+          last_sent_at: string | null
+          locked_until: string | null
+          send_count: number
+          send_window_start: string | null
+          updated_at: string
+        }
+        Insert: {
+          failed_attempts?: number
+          key: string
+          last_sent_at?: string | null
+          locked_until?: string | null
+          send_count?: number
+          send_window_start?: string | null
+          updated_at?: string
+        }
+        Update: {
+          failed_attempts?: number
+          key?: string
+          last_sent_at?: string | null
+          locked_until?: string | null
+          send_count?: number
+          send_window_start?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       classification_history: {
         Row: {
           changed_at: string
@@ -2290,6 +2320,17 @@ export type Database = {
         }
       }
       assistant_consume_question: { Args: never; Returns: Json }
+      auth_account_status: { Args: { p_email: string }; Returns: string }
+      auth_code_lock_remaining: { Args: { p_key: string }; Returns: number }
+      auth_code_register_failure: {
+        Args: { p_key: string; p_lock_minutes?: number; p_max?: number }
+        Returns: Json
+      }
+      auth_code_reserve_send: {
+        Args: { p_cooldown?: number; p_key: string; p_max_per_hour?: number }
+        Returns: Json
+      }
+      auth_code_reset: { Args: { p_key: string }; Returns: undefined }
       cancel_agent_request: {
         Args: { p_id: string }
         Returns: {
