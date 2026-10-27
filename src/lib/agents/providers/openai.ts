@@ -53,10 +53,10 @@ export const openAiProvider: ModelProvider = {
         parameters: t.parameters,
         strict: true,
       })),
-      // El agente siempre responde con herramientas (nunca texto suelto); puede
-      // elegir varias en orden (el motor usa como máximo MAX_ACTIONS_PER_RUN).
+      // El agente responde SIEMPRE con una sola llamada a la función estructurada
+      // «responder» (varios mensajes van dentro de esa llamada, ver reply-plan.ts).
       tool_choice: "required",
-      parallel_tool_calls: true,
+      parallel_tool_calls: false,
       max_output_tokens: limits.maxOutputTokens,
       store: false,
     };

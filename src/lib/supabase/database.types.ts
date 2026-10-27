@@ -68,6 +68,7 @@ export type Database = {
         Row: {
           agent_id: string
           allowed_tools: string[]
+          burst_gap_seconds: number
           business_info: string
           daily_cap_ceiling: number
           delay_seconds_max: number
@@ -94,6 +95,7 @@ export type Database = {
         Insert: {
           agent_id: string
           allowed_tools?: string[]
+          burst_gap_seconds?: number
           business_info?: string
           daily_cap_ceiling?: number
           delay_seconds_max?: number
@@ -120,6 +122,7 @@ export type Database = {
         Update: {
           agent_id?: string
           allowed_tools?: string[]
+          burst_gap_seconds?: number
           business_info?: string
           daily_cap_ceiling?: number
           delay_seconds_max?: number
@@ -339,6 +342,7 @@ export type Database = {
         Row: {
           agent_id: string
           conversation_id: string | null
+          coverage: Json | null
           created_at: string
           discarded_stale: boolean
           est_cost_usd: number
@@ -351,11 +355,13 @@ export type Database = {
           outcome: string
           output_tokens: number
           reason: string | null
+          retried: boolean
           run_id: string | null
         }
         Insert: {
           agent_id: string
           conversation_id?: string | null
+          coverage?: Json | null
           created_at?: string
           discarded_stale?: boolean
           est_cost_usd?: number
@@ -368,11 +374,13 @@ export type Database = {
           outcome: string
           output_tokens?: number
           reason?: string | null
+          retried?: boolean
           run_id?: string | null
         }
         Update: {
           agent_id?: string
           conversation_id?: string | null
+          coverage?: Json | null
           created_at?: string
           discarded_stale?: boolean
           est_cost_usd?: number
@@ -385,6 +393,7 @@ export type Database = {
           outcome?: string
           output_tokens?: number
           reason?: string | null
+          retried?: boolean
           run_id?: string | null
         }
         Relationships: [
@@ -1738,6 +1747,10 @@ export type Database = {
       }
       agent_answered_through: {
         Args: { p_conversation_id: string }
+        Returns: string
+      }
+      agent_burst_start: {
+        Args: { p_conversation_id: string; p_gap_seconds: number }
         Returns: string
       }
       agent_limits: { Args: { p_key: string }; Returns: Json }

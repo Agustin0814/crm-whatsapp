@@ -78,6 +78,23 @@ export function scopeBlockReason(
   return null;
 }
 
+/**
+ * Ráfaga actual de mensajes sin responder: desde el último hacia atrás,
+ * mientras cada uno llegó a menos de `gapSeconds` del siguiente. Los anteriores
+ * (por ejemplo, uno viejo de hace horas) quedan fuera: el modelo los ve solo
+ * como contexto del historial. La lista debe venir ordenada por fecha.
+ */
+export function currentBurst<T extends { created_at: string }>(messages: T[], gapSeconds: number): T[] {
+  if (!messages.length) return [];
+  let start = messages.length - 1;
+  while (start > 0) {
+    const gap = Date.parse(messages[start].created_at) - Date.parse(messages[start - 1].created_at);
+    if (!(gap < gapSeconds * 1000)) break;
+    start -= 1;
+  }
+  return messages.slice(start);
+}
+
 /** Costo estimado en USD con los precios por millón de la capa bloqueada. */
 export function estimateCostUsd(
   usage: { inputTokens: number; outputTokens: number },

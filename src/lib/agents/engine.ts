@@ -7,6 +7,7 @@ import { WhatsAppApiError } from "@/lib/whatsapp/send";
 import { DEFAULT_LIMITS, isQuickReplyUsable, parseAgentConfig, type AgentConfig, type AgentLimits } from "./config";
 import {
   AGENT_TIME_ZONE,
+  currentBurst,
   estimateCostUsd,
   isScheduleActive,
   matchEscalationTopic,
@@ -22,7 +23,18 @@ import {
   PREVIOUS_REPLIES_LIMIT,
   type PromptMessage,
 } from "./prompt";
-import { getModelProvider, ModelProviderError, type ToolCall } from "./provider";
+import { getModelProvider, ModelProviderError, type ChatTurn } from "./provider";
+import {
+  parseReplyPlan,
+  RESPONDER_TOOL,
+  retryNotice,
+  TOOL_QUICK_REPLY,
+  TOOL_TEXT,
+  TOOL_TRANSFER,
+  validateReplyPlan,
+  type CoverageEntry,
+  type PlanValidation,
+} from "./reply-plan";
 import { AgentSendError, sendAgentText } from "./send";
 
 // Motor común de los agentes. Todo límite y regla de seguridad se aplica aquí
@@ -252,6 +264,8 @@ type RunContext = {
   };
   /** Último mensaje del cliente que vio esta corrida y cuántos atendió. */
   snapshot: { lastInboundId: string; lastInboundAt: string; handled: number };
+  /** Cobertura de preguntas y reintento (solo depuración, va a agent_usage_log). */
+  debug?: { coverage: CoverageEntry[]; retried: boolean };
 };
 
 async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
@@ -290,8 +304,11 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
   if (!isWindowOpen(conversation.last_inbound_at)) return skip(supabase, run, "Fuera de la ventana de 24 h");
   if (!contact.wa_id) return skip(supabase, run, "Contacto sin WhatsApp");
 
-  // --- Snapshot: mensajes del cliente sin responder ---
-  const { unanswered } = await loadUnanswered(supabase, conversation.id);
+  // --- Snapshot: mensajes del cliente sin responder (solo la ráfaga actual) ---
+  const { unanswered: allUnanswered } = await loadUnanswered(supabase, conversation.id);
+  // Un mensaje viejo sin responder (de hace horas) no entra al bloque «sin
+  // responder»: queda como contexto en el historial.
+  const unanswered = currentBurst(allUnanswered, locked.burst_gap_seconds);
   const last = unanswered.at(-1);
   if (!last) return skip(supabase, run, "Ya se respondieron todos los mensajes");
   await supabase
@@ -430,24 +447,17 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     contactFirstName: contact.name?.trim().split(/\s+/)[0] || null,
     agentAlreadySpoke: previousReplies.length > 0,
     previousReplies,
+    allowed: allowedTypes(locked),
   });
-  const tools = AGENT_TOOLS.filter(
-    (t) => locked.allowed_tools.includes(t.name) && (t.name !== "enviar_respuesta_rapida" || allowedReplies.length > 0),
-  );
 
-  // --- Modelo ---
-  let result;
+  // --- Modelo: UNA salida estructurada, validada (cobertura) con un reintento ---
+  let planned: PlanOutcome;
   try {
-    result = await getModelProvider().generateReply({
+    planned = await planReply({
       system,
-      messages: [...history, buildUnansweredTurn(unansweredPrompt)],
-      tools,
-      limits: {
-        model: locked.model,
-        maxOutputTokens: locked.max_output_tokens,
-        reasoningEffort: (["minimal", "low", "medium", "high"] as const).find((e) => e === locked.reasoning_effort) ?? "low",
-        temperature: locked.temperature === null ? null : Number(locked.temperature),
-      },
+      turns: [...history, buildUnansweredTurn(unansweredPrompt)],
+      locked,
+      allowedShortcuts: allowedReplies.map((q) => q.shortcut),
     });
   } catch (error) {
     const usage = error instanceof ModelProviderError ? error.usage : NO_USAGE;
@@ -457,51 +467,33 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     await alertOnce(supabase, agent.id, "error", "superadmin", periods.day, "El asistente tuvo errores al generar respuestas hoy. Revisa el registro de actividad.");
     return { acted: true, reason };
   }
+  const { validation, usage, model } = planned;
+  ctx.debug = { coverage: validation.coverage, retried: planned.retried };
 
-  const usage = result.usage;
-  const calls: ToolCall[] = (
-    result.toolCalls.length ? result.toolCalls : result.text ? [{ name: "responder_texto_corto", arguments: { texto: result.text } }] : []
-  )
-    .filter((c) => locked.allowed_tools.includes(c.name))
-    .slice(0, MAX_ACTIONS_PER_RUN);
-  if (!calls.length) {
-    await logUsage(supabase, { run, outcome: "error", reason: "El modelo no eligió una herramienta permitida", usage, model: result.model, locked, handled: snapshot.handled });
-    return { acted: true, reason: "Herramienta no permitida" };
+  // Si tras el reintento sigue sin cubrir todo, NO se manda una respuesta a medias.
+  if (!validation.ok) {
+    return handoff(ctx, `Respuesta incompleta: ${validation.problems.join("; ")}`.slice(0, 280), usage, "handoff", model);
+  }
+  if (validation.action === "transfer") {
+    return handoff(ctx, validation.reason ? `El asistente transfirió: ${validation.reason}` : "El asistente transfirió a una persona", usage, "handoff", model);
   }
 
-  // Transferir gana sobre todo lo demás: solo se hace el traspaso.
-  const transfer = calls.find((c) => c.name === "transferir_a_humano");
-  if (transfer) {
-    const motivo = typeof transfer.arguments.motivo === "string" ? transfer.arguments.motivo.trim().slice(0, 200) : "";
-    return handoff(ctx, motivo ? `El asistente transfirió: ${motivo}` : "El asistente transfirió a una persona", usage, "handoff", result.model);
-  }
-
-  // --- Convertir las herramientas en mensajes (en orden) ---
+  // --- Mensajes del plan, en orden ---
   const parts: ReplyPart[] = [];
   const reasons: string[] = [];
   let needsApproval = false;
-  for (const call of calls) {
-    if (call.name === "enviar_respuesta_rapida") {
-      const shortcut = typeof call.arguments.shortcut === "string" ? call.arguments.shortcut.trim().replace(/^\//, "") : "";
-      const reply = allowedReplies.find((q) => q.shortcut === shortcut);
-      if (!reply) {
-        reasons.push(`respuesta rápida no permitida (${shortcut || "vacía"})`);
-        continue;
-      }
+  for (const m of validation.messages) {
+    if (m.kind === "quick_reply") {
+      const reply = allowedReplies.find((q) => q.shortcut === m.shortcut);
+      if (!reply) continue; // ya validado; defensa extra
       // «Con aprobación»: siempre queda como sugerencia, aun en automático.
       if (reply.agent_permission === "approval") needsApproval = true;
       parts.push({ text: applyTemplate(reply.body, contact), quickReplyId: reply.id });
       reasons.push(`/${reply.shortcut}`);
     } else {
-      const texto = typeof call.arguments.texto === "string" ? call.arguments.texto.trim().slice(0, MAX_REPLY_CHARS) : "";
-      if (!texto) continue;
-      parts.push({ text: texto, quickReplyId: null });
-      reasons.push("texto corto");
+      parts.push({ text: m.text.slice(0, MAX_REPLY_CHARS), quickReplyId: null });
+      reasons.push("texto");
     }
-  }
-  if (!parts.length) {
-    await logUsage(supabase, { run, outcome: "error", reason: `Sin mensajes válidos (${reasons.join(", ") || "vacío"})`, usage, model: result.model, locked, handled: snapshot.handled });
-    return { acted: true, reason: "Sin mensajes válidos" };
   }
   // El tope diario cuenta cada mensaje: se recortan los que no caben.
   const allowedParts = parts.slice(0, Math.max(1, remainingToday));
@@ -511,9 +503,73 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
     parts: allowedParts,
     forceSuggestion: needsApproval,
     usage,
-    model: result.model,
-    reason: `${allowedParts.length > 1 ? `${allowedParts.length} mensajes: ` : ""}${reasons.join(", ")}`,
+    model,
+    reason: `${allowedParts.length > 1 ? `${allowedParts.length} mensajes: ` : ""}${reasons.join(" + ")}${planned.retried ? " (tras reintento)" : ""}`,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Planificación con el modelo (la usan el motor y el probador)
+// ---------------------------------------------------------------------------
+
+/** Tipos de mensaje que permite la capa del proveedor (`allowed_tools`). */
+export function allowedTypes(locked: Pick<Locked, "allowed_tools">): { text: boolean; quickReply: boolean; transfer: boolean } {
+  return {
+    text: locked.allowed_tools.includes(TOOL_TEXT),
+    quickReply: locked.allowed_tools.includes(TOOL_QUICK_REPLY),
+    transfer: locked.allowed_tools.includes(TOOL_TRANSFER),
+  };
+}
+
+export type PlanOutcome = { validation: PlanValidation; usage: Usage; model: string; retried: boolean };
+
+/**
+ * Pide al modelo un plan con la función «responder» y valida que cubra TODAS
+ * las preguntas detectadas con mensajes permitidos. Si no, reintenta UNA vez
+ * con un aviso. Devuelve la última validación (ok o con sus problemas) y los
+ * tokens sumados de ambos intentos. Lanza ModelProviderError si falla la API.
+ */
+export async function planReply(input: {
+  system: string;
+  turns: ChatTurn[];
+  locked: Locked;
+  allowedShortcuts: string[];
+}): Promise<PlanOutcome> {
+  const { locked } = input;
+  const limits = {
+    model: locked.model,
+    maxOutputTokens: locked.max_output_tokens,
+    reasoningEffort: (["minimal", "low", "medium", "high"] as const).find((e) => e === locked.reasoning_effort) ?? "low",
+    temperature: locked.temperature === null ? null : Number(locked.temperature),
+  };
+  const opts = { allowedTools: locked.allowed_tools, allowedShortcuts: input.allowedShortcuts, maxMessages: MAX_ACTIONS_PER_RUN };
+  const usage: Usage = { inputTokens: 0, outputTokens: 0 };
+  let model = locked.model;
+  let validation: PlanValidation = { ok: false, problems: ["sin respuesta"], coverage: [] };
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const turns: ChatTurn[] =
+      attempt === 0 || validation.ok ? input.turns : [...input.turns, { role: "user", content: retryNotice(validation.problems) }];
+    let result;
+    try {
+      result = await getModelProvider().generateReply({ system: input.system, messages: turns, tools: AGENT_TOOLS, limits });
+    } catch (error) {
+      const spent = error instanceof ModelProviderError ? error.usage : NO_USAGE;
+      throw new ModelProviderError(error instanceof Error ? error.message : "Error del modelo", {
+        inputTokens: usage.inputTokens + spent.inputTokens,
+        outputTokens: usage.outputTokens + spent.outputTokens,
+      });
+    }
+    usage.inputTokens += result.usage.inputTokens;
+    usage.outputTokens += result.usage.outputTokens;
+    model = result.model;
+    const call = result.toolCalls.find((c) => c.name === RESPONDER_TOOL.name);
+    validation = call
+      ? validateReplyPlan(parseReplyPlan(call.arguments), opts)
+      : { ok: false, problems: ["no llamó a la función «responder»"], coverage: [] };
+    if (validation.ok) return { validation, usage, model, retried: attempt === 1 };
+  }
+  return { validation, usage, model, retried: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -541,7 +597,15 @@ async function deliver(
   },
 ): Promise<DeliverResult> {
   const { supabase, run, snapshot } = ctx;
-  const base = { run, usage: input.usage, model: input.model, locked: ctx.locked, handled: snapshot.handled };
+  const base = {
+    run,
+    usage: input.usage,
+    model: input.model,
+    locked: ctx.locked,
+    handled: snapshot.handled,
+    coverage: ctx.debug?.coverage,
+    retried: ctx.debug?.retried,
+  };
 
   const newer = await newerInbound(supabase, ctx.conversation.id, snapshot.lastInboundAt);
   if (newer) {
@@ -694,6 +758,9 @@ async function logUsage(
     messagesCount?: number;
     /** Respuesta descartada porque llegaron mensajes nuevos. */
     discardedStale?: boolean;
+    /** Preguntas detectadas por el modelo y cómo las cubrió (depuración). */
+    coverage?: CoverageEntry[];
+    retried?: boolean;
   },
 ): Promise<void> {
   const cost = input.locked
@@ -716,6 +783,8 @@ async function logUsage(
     handled_messages: input.handled ?? 0,
     messages_count: input.messagesCount ?? 0,
     discarded_stale: input.discardedStale ?? false,
+    coverage: input.coverage ? (input.coverage.slice(0, 10) as unknown as Json) : null,
+    retried: input.retried ?? false,
   });
   if (error) console.error(`[agents] No se pudo registrar el uso: ${error.message}`);
 }
