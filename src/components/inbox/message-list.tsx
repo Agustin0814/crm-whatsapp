@@ -3,9 +3,10 @@
 import { BotIcon, CircleHelpIcon } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useRef } from "react";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
+import { profileName, useCrm } from "@/components/crm/crm-provider";
 import { EmptyState } from "@/components/crm/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ContactWithTags, Message } from "@/lib/crm/types";
+import { EVENT_LABELS, type ContactWithTags, type ConversationEvent, type Message } from "@/lib/crm/types";
 import { dayKey, formatDayLabel, formatTime } from "@/lib/format";
 import { isMediaKind } from "@/lib/media/rules";
 import { cn } from "@/lib/utils";
@@ -28,14 +29,28 @@ type Props = {
   contact: ContactWithTags | null;
   loading: boolean;
   now: number | null;
+  /** Historial de etapas: líneas discretas de sistema entre los mensajes. */
+  events?: ConversationEvent[];
 };
+
+type TimelineItem = { kind: "message"; time: string; message: Message } | { kind: "event"; time: string; event: ConversationEvent };
+
+/** Mensajes y eventos de etapa en un solo orden cronológico. */
+function buildTimeline(messages: Message[], events: ConversationEvent[]): TimelineItem[] {
+  const items: TimelineItem[] = messages.map((message) => ({ kind: "message", time: message.wa_timestamp ?? message.created_at, message }));
+  if (events.length === 0) return items;
+  for (const event of events) items.push({ kind: "event", time: event.created_at, event });
+  return items.sort((a, b) => a.time.localeCompare(b.time));
+}
 
 /**
  * Mensajes agrupados por día. Los consecutivos del mismo remitente se agrupan
  * y el avatar del contacto solo aparece en el primero del grupo.
  */
-export function MessageList({ messages, contact, loading, now }: Props) {
+export function MessageList({ messages, contact, loading, now, events = [] }: Props) {
   const agentName = useAgentNames();
+  const { profiles } = useCrm();
+  const timeline = buildTimeline(messages, events);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const lastIdRef = useRef<string | null>(null);
@@ -78,14 +93,16 @@ export function MessageList({ messages, contact, loading, now }: Props) {
 
       {!loading && messages.length > 0 && (
         <ol className="mx-auto flex max-w-3xl flex-col" aria-label="Mensajes">
-          {messages.map((message, i) => {
-            const time = message.wa_timestamp ?? message.created_at;
-            const prev = messages[i - 1];
-            const prevTime = prev ? (prev.wa_timestamp ?? prev.created_at) : null;
-            const newDay = !prevTime || dayKey(prevTime) !== dayKey(time);
-            const firstOfGroup = newDay || prev?.direction !== message.direction;
+          {timeline.map((item, i) => {
+            const time = item.time;
+            const prev = timeline[i - 1];
+            const newDay = !prev || dayKey(prev.time) !== dayKey(time);
+            const key = item.kind === "message" ? item.message.id : `e-${item.event.id}`;
+            const firstOfGroup =
+              item.kind === "message" &&
+              (newDay || prev?.kind !== "message" || prev.message.direction !== item.message.direction);
             return (
-              <Fragment key={message.id}>
+              <Fragment key={key}>
                 {newDay && now !== null && (
                   <li className="sticky top-0 z-10 my-4 flex justify-center">
                     <span className="rounded-full bg-superficie-3 px-4 py-1 text-xs font-medium text-texto-suave shadow-xs">
@@ -93,19 +110,39 @@ export function MessageList({ messages, contact, loading, now }: Props) {
                     </span>
                   </li>
                 )}
-                <MessageBubble
-                  message={message}
-                  time={time}
-                  firstOfGroup={firstOfGroup}
-                  contact={contact}
-                  agentName={message.sent_by_agent ? agentName(message.agent_id) : null}
-                />
+                {item.kind === "event" ? (
+                  <StageEventLine
+                    event={item.event}
+                    who={item.event.user_id ? profileName(profiles.find((p) => p.id === item.event.user_id)) : "el asistente"}
+                  />
+                ) : (
+                  <MessageBubble
+                    message={item.message}
+                    time={time}
+                    firstOfGroup={firstOfGroup}
+                    contact={contact}
+                    agentName={item.message.sent_by_agent ? agentName(item.message.agent_id) : null}
+                  />
+                )}
               </Fragment>
             );
           })}
         </ol>
       )}
     </div>
+  );
+}
+
+/** Línea de sistema (solo interna): «Pasó a Reparto por Ana · 10:42». */
+function StageEventLine({ event, who }: { event: ConversationEvent; who: string }) {
+  const label = EVENT_LABELS[event.type] ?? event.type;
+  return (
+    <li className="my-2 flex justify-center px-6">
+      <p className="max-w-full text-center text-xs text-texto-suave">
+        <span className="font-medium">{label}</span> por {who} · {formatTime(event.created_at)}
+        {event.note && <span className="block text-[0.6875rem] italic">«{event.note}»</span>}
+      </p>
+    </li>
   );
 }
 

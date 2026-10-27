@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -22,9 +23,23 @@ import {
 } from "@/lib/agents/config";
 import type { QuickReply } from "@/lib/crm/types";
 
+/** quick_replies.visible_para: qué roles la ven en el menú «/» (admin las ve todas). */
+export type QuickReplyAudience = "vendedores" | "repartidores" | "ambos";
+
+export const AUDIENCE_LABELS: Record<QuickReplyAudience, string> = {
+  vendedores: "Vendedores",
+  repartidores: "Repartidores",
+  ambos: "Vendedores y repartidores",
+};
+
+export function isQuickReplyAudience(value: unknown): value is QuickReplyAudience {
+  return value === "vendedores" || value === "repartidores" || value === "ambos";
+}
+
 export type QuickReplyValues = {
   shortcut: string;
   body: string;
+  visible_para: QuickReplyAudience;
   /** Solo los manda un superadmin (la base rechaza el cambio de cualquier otro rol). */
   when_to_use?: string | null;
   agent_permission?: QuickReplyPermission;
@@ -58,8 +73,12 @@ export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit, showAgen
   const [permission, setPermission] = useState<QuickReplyPermission>(
     isQuickReplyPermission(reply?.agent_permission) ? reply.agent_permission : "human_only",
   );
+  const initialAudience = isQuickReplyAudience(reply?.visible_para) ? reply.visible_para : "ambos";
+  const [forSellers, setForSellers] = useState(initialAudience !== "repartidores");
+  const [forDelivery, setForDelivery] = useState(initialAudience !== "vendedores");
   const [saving, setSaving] = useState(false);
   const shortcutValid = SHORTCUT_RE.test(shortcut);
+  const audienceValid = forSellers || forDelivery;
 
   function insertVariable(key: string) {
     const el = bodyRef.current;
@@ -75,11 +94,12 @@ export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit, showAgen
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!shortcutValid || !body.trim()) return;
+    if (!shortcutValid || !body.trim() || !audienceValid) return;
     setSaving(true);
     const ok = await onSubmit({
       shortcut,
       body: body.trim(),
+      visible_para: forSellers && forDelivery ? "ambos" : forSellers ? "vendedores" : "repartidores",
       ...(showAgentFields ? { when_to_use: whenToUse.trim() || null, agent_permission: permission } : {}),
     });
     setSaving(false);
@@ -155,6 +175,25 @@ export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit, showAgen
             </div>
           )}
 
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Visible para</legend>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={forSellers} onCheckedChange={(v) => setForSellers(v === true)} />
+                Vendedores
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={forDelivery} onCheckedChange={(v) => setForDelivery(v === true)} />
+                Repartidores
+              </label>
+            </div>
+            <p className={audienceValid ? "text-xs text-muted-foreground" : "text-xs text-error-texto"} role={audienceValid ? undefined : "alert"}>
+              {audienceValid
+                ? "Quién la ve en el menú «/» del chat. Los administradores las ven todas."
+                : "Elige al menos un grupo."}
+            </p>
+          </fieldset>
+
           {showAgentFields && (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
@@ -191,7 +230,7 @@ export function QuickReplyDialog({ open, onOpenChange, reply, onSubmit, showAgen
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={saving || !shortcutValid || !body.trim()}>
+            <Button type="submit" disabled={saving || !shortcutValid || !body.trim() || !audienceValid}>
               {reply ? "Guardar cambios" : "Crear respuesta"}
             </Button>
           </DialogFooter>

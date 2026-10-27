@@ -52,7 +52,7 @@ export function ConversationActionsMenu({
   triggerClassName,
   align = "end",
 }: Props) {
-  const { profiles, tags } = useCrm();
+  const { activeProfiles: profiles, tags } = useCrm();
   const tagIds = new Set(conversation.contact?.tags.map((t) => t.id));
 
   return (

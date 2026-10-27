@@ -61,8 +61,9 @@ export async function checkAssistantAccess(supabase: UserClient): Promise<Assist
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, status: 401, error: "No autenticado" };
-  const { data: profile } = await supabase.from("profiles").select("role, full_name").eq("id", user.id).maybeSingle();
-  if (!profile || !isAssistantRole(profile.role)) return { ok: false, status: 403, error: "Sin permiso" };
+  const { data: profile } = await supabase.from("profiles").select("role, full_name, is_active").eq("id", user.id).maybeSingle();
+  // El repartidor no es un AssistantRole: nunca usa el asistente.
+  if (!profile?.is_active || !isAssistantRole(profile.role)) return { ok: false, status: 403, error: "Sin permiso" };
   const admin = createAdminClient();
   const { data: agent } = await admin.from("agents").select("id, enabled, config, agent_locked_config(*)").eq("kind", "system").maybeSingle();
   const locked = agent?.agent_locked_config ?? null;

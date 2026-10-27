@@ -218,6 +218,8 @@ export const PAUSE_REASON_LABELS: Record<string, string> = {
   assigned: "Conversación asignada",
   handoff: "Transferido a una persona",
   limit_consecutive: "Límite de respuestas seguidas",
+  reparto: "En reparto",
+  devuelto_ventas: "Devuelto a ventas",
 };
 
 /**

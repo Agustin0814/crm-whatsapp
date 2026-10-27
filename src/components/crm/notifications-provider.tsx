@@ -14,7 +14,8 @@ import {
   type ReactNode,
 } from "react";
 import { APP_NAME, BRAND_ASSETS } from "@/lib/brand";
-import type { Message } from "@/lib/crm/types";
+import { toast } from "sonner";
+import type { AppNotification, Message } from "@/lib/crm/types";
 import { createNotificationSound, type NotificationSound } from "@/lib/notification-sound";
 import { createClient } from "@/lib/supabase/client";
 
@@ -75,6 +76,11 @@ function writeFlag(key: string, value: boolean) {
  * Notificaciones de mensajes entrantes: sonido, contador en el título de la
  * pestaña y notificaciones del navegador cuando la pestaña no está activa.
  * Nunca notifica mensajes salientes (propios) ni de conversaciones archivadas.
+ *
+ * Además muestra los AVISOS de la tabla notifications (chat que entra a Ventas
+ * o a Reparto). Los crea SOLO private.dispatch_notification en la base (punto
+ * central de envío; ahí se conectarán correo o push) y RLS hace que cada
+ * persona reciba únicamente los suyos.
  */
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const supabase = createClient();
@@ -120,6 +126,18 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     return { total: rows.reduce((sum, c) => sum + c.unread_count, 0), conversations: rows.length };
   }, [supabase]);
 
+  /** Abre un chat: en la bandeja directamente; desde otra página, navegando. */
+  const openConversation = useCallback(
+    (conversationId: string) => {
+      if (window.location.pathname === "/") {
+        window.dispatchEvent(new CustomEvent(OPEN_CONVERSATION_EVENT, { detail: conversationId }));
+      } else {
+        router.push(`/?c=${conversationId}`);
+      }
+    },
+    [router],
+  );
+
   const notify = useCallback(
     async (message: Message) => {
       // Solo entrantes (el filtro del canal ya lo garantiza; doble seguridad).
@@ -147,17 +165,50 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         const n = new Notification(title, { body: body.slice(0, 140), tag: conv.id, icon: BRAND_ASSETS.icon192 });
         n.onclick = () => {
           window.focus();
-          // En la bandeja se abre directamente; desde otra página se navega.
-          if (window.location.pathname === "/") {
-            window.dispatchEvent(new CustomEvent(OPEN_CONVERSATION_EVENT, { detail: conv.id }));
-          } else {
-            router.push(`/?c=${conv.id}`);
-          }
+          openConversation(conv.id);
           n.close();
         };
       }
     },
-    [supabase, router],
+    [supabase, openConversation],
+  );
+
+  /** Aviso de etapa (notifications): sonido, aviso en pantalla y del navegador si está oculta. */
+  const showNotice = useCallback(
+    (notice: AppNotification) => {
+      if (notice.read_at) return;
+      const markRead = () =>
+        void supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("id", notice.id);
+      const open = () => {
+        markRead();
+        if (notice.conversation_id) openConversation(notice.conversation_id);
+      };
+      if (prefsRef.current.sound) soundRef.current?.play();
+      toast(notice.title, {
+        description: notice.body ?? undefined,
+        action: notice.conversation_id ? { label: "Abrir", onClick: open } : undefined,
+        onDismiss: markRead,
+        duration: 10_000,
+      });
+      if (
+        document.visibilityState !== "visible" &&
+        prefsRef.current.desktop &&
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted"
+      ) {
+        const n = new Notification(notice.title, {
+          body: notice.body ?? "",
+          tag: `aviso-${notice.id}`,
+          icon: BRAND_ASSETS.icon192,
+        });
+        n.onclick = () => {
+          window.focus();
+          open();
+          n.close();
+        };
+      }
+    },
+    [supabase, openConversation],
   );
 
   // Realtime: mensajes entrantes, contadores y estado de la conexión.
@@ -188,6 +239,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           (payload) => void notify(payload.new),
         )
         .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, scheduleReload)
+        .on<AppNotification>("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, (payload) =>
+          showNotice(payload.new),
+        )
         .subscribe((status) => {
           if (cancelled) return; // el CLOSED de la limpieza no cuenta
           if (status === "SUBSCRIBED") {
@@ -205,7 +259,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("offline", onOffline);
       if (channel) void supabase.removeChannel(channel);
     };
-  }, [supabase, fetchUnread, notify]);
+  }, [supabase, fetchUnread, notify, showNotice]);
 
   const value = useMemo<NotificationsContextValue>(
     () => ({

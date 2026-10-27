@@ -11,7 +11,7 @@ export type SystemAllowedRoles = "admins" | "admins_and_agents";
 
 export const SYSTEM_ALLOWED_ROLES_LABELS: Record<SystemAllowedRoles, string> = {
   admins: "Solo administradores",
-  admins_and_agents: "Administradores y agentes",
+  admins_and_agents: "Administradores y vendedores",
 };
 
 export type SystemAgentConfig = {
@@ -85,7 +85,7 @@ export function parseSystemConfig(raw: unknown, questionsMax = 50): SystemAgentC
 /** ¿Este rol puede usar el asistente con esta configuración? */
 export function canUseSystemAssistant(config: Pick<SystemAgentConfig, "allowed_roles">, role: string | null | undefined): boolean {
   if (role === "superadmin" || role === "admin") return true;
-  return role === "agent" && config.allowed_roles === "admins_and_agents";
+  return role === "vendedor" && config.allowed_roles === "admins_and_agents";
 }
 
 /** Aviso fijo del chat temporal. */

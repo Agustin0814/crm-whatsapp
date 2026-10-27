@@ -77,7 +77,7 @@ const FIELD_LABELS: Partial<Record<keyof Values, string>> = {
 };
 
 const ROLE_OPTIONS: { value: AssistantRole; label: string }[] = [
-  { value: "agent", label: "Agente" },
+  { value: "vendedor", label: "Vendedor" },
   { value: "admin", label: "Administrador" },
   { value: "superadmin", label: "Proveedor" },
 ];

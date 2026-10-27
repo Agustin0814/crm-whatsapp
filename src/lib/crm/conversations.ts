@@ -3,8 +3,10 @@ import type {
   ContactWithTags,
   Conversation,
   ConversationItem,
+  ConversationEvent,
   ConversationStatus,
   Contact,
+  Stage,
   Tag,
 } from "./types";
 
@@ -35,6 +37,23 @@ export function normalizeConversation(raw: RawConversation): ConversationItem {
   return { ...conversation, contact: contacts ? normalizeContact(contacts) : null };
 }
 
+/**
+ * Orden de la bandeja del repartidor: los que llevan más tiempo en reparto
+ * primero (igual que search_conversations con p_order = 'stage_oldest').
+ */
+export function compareByStageOldest(a: Conversation, b: Conversation): number {
+  if (a.stage_changed_at !== b.stage_changed_at) {
+    if (!a.stage_changed_at) return 1;
+    if (!b.stage_changed_at) return -1;
+    return a.stage_changed_at.localeCompare(b.stage_changed_at);
+  }
+  return compareConversations(a, b);
+}
+
+export function comparatorFor(filters: Pick<InboxFilters, "order">) {
+  return filters.order === "stage_oldest" ? compareByStageOldest : compareConversations;
+}
+
 /** Orden de la bandeja: fijadas primero y luego por último mensaje (nulls al final). */
 export function compareConversations(a: Conversation, b: Conversation): number {
   if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
@@ -49,6 +68,7 @@ export function compareConversations(a: Conversation, b: Conversation): number {
 // --- Filtros -----------------------------------------------------------------
 
 export type QuickFilter = "all" | "mine" | "unassigned" | "unread";
+export type StageFilter = "all" | Stage;
 export type StatusFilter = "active" | "all" | ConversationStatus;
 
 export type InboxFilters = {
@@ -61,6 +81,10 @@ export type InboxFilters = {
   /** Fechas "AAAA-MM-DD" (inclusive) sobre la fecha del último mensaje. */
   from: string | null;
   to: string | null;
+  /** Etapa del chat (pestañas de la bandeja). */
+  stage: StageFilter;
+  /** "stage_oldest" = bandeja del repartidor. */
+  order: "recent" | "stage_oldest";
 };
 
 export const DEFAULT_FILTERS: InboxFilters = {
@@ -71,7 +95,15 @@ export const DEFAULT_FILTERS: InboxFilters = {
   assigneeId: null,
   from: null,
   to: null,
+  stage: "all",
+  order: "recent",
 };
+
+/**
+ * Bandeja del repartidor: una sola lista de sus chats en reparto, los más
+ * antiguos primero. RLS ya limita qué chats ve; el filtro solo ordena.
+ */
+export const DELIVERY_FILTERS: InboxFilters = { ...DEFAULT_FILTERS, stage: "reparto", order: "stage_oldest" };
 
 /** Cuántos filtros del panel (estado, etiquetas, agente, fechas) están activos. */
 export function countAdvancedFilters(f: InboxFilters): number {
@@ -92,6 +124,8 @@ type SearchArgs = {
   p_unread_only?: boolean;
   p_from?: string;
   p_to?: string;
+  p_stages?: string[];
+  p_order?: string;
 };
 
 function toSearchArgs(f: InboxFilters, myId: string | null): SearchArgs {
@@ -110,6 +144,8 @@ function toSearchArgs(f: InboxFilters, myId: string | null): SearchArgs {
   else if (f.assigneeId) args.p_assigned_to = f.assigneeId;
 
   if (f.quick === "unread") args.p_unread_only = true;
+  if (f.stage !== "all") args.p_stages = [f.stage];
+  if (f.order !== "recent") args.p_order = f.order;
 
   // Fechas locales → límites del día en la zona horaria del navegador.
   if (f.from) args.p_from = new Date(`${f.from}T00:00:00`).toISOString();
@@ -138,7 +174,7 @@ export async function fetchConversationPage(
     })
     .select(CONVERSATION_SELECT);
   if (error) throw error;
-  return (data as unknown as RawConversation[]).map(normalizeConversation).sort(compareConversations);
+  return (data as unknown as RawConversation[]).map(normalizeConversation).sort(comparatorFor(filters));
 }
 
 /**
@@ -175,4 +211,32 @@ export async function fetchConversationById(
     .maybeSingle();
   if (error) throw error;
   return data ? normalizeConversation(data as unknown as RawConversation) : null;
+}
+
+// --- Etapas ------------------------------------------------------------------
+
+export type StageCounts = Record<Stage, number> & { all: number };
+
+/** Conversaciones (no archivadas) por etapa, respetando RLS. */
+export async function fetchStageCounts(supabase: BrowserClient): Promise<StageCounts> {
+  const { data, error } = await supabase.rpc("conversation_stage_counts");
+  if (error) throw error;
+  const counts: StageCounts = { all: 0, sin_asignar: 0, ventas: 0, reparto: 0 };
+  for (const row of data) {
+    const n = Number(row.total);
+    if (row.stage === "sin_asignar" || row.stage === "ventas" || row.stage === "reparto") counts[row.stage] = n;
+    counts.all += n;
+  }
+  return counts;
+}
+
+/** Historial de etapas de un chat (líneas de sistema). */
+export async function fetchConversationEvents(supabase: BrowserClient, conversationId: string): Promise<ConversationEvent[]> {
+  const { data, error } = await supabase
+    .from("conversation_events")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .order("created_at");
+  if (error) throw error;
+  return data;
 }

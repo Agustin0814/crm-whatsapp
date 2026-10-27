@@ -2,32 +2,38 @@
 
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ContactDetails } from "@/components/contacts/contact-details";
 import { useShell } from "@/components/crm/app-nav";
 import { profileName, useCrm } from "@/components/crm/crm-provider";
 import { EmptyState } from "@/components/crm/empty-state";
 import { OPEN_CONVERSATION_EVENT, useNotifications } from "@/components/crm/notifications-provider";
+import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { errorMessage, fetchContact, setContactTag } from "@/lib/crm/contacts";
 import {
-  compareConversations,
+  comparatorFor,
   DEFAULT_FILTERS,
+  DELIVERY_FILTERS,
   fetchConversationById,
+  fetchConversationEvents,
   fetchConversationIfMatches,
   fetchConversationPage,
+  fetchStageCounts,
   PAGE_SIZE,
   type InboxFilters,
+  type StageCounts,
 } from "@/lib/crm/conversations";
 import {
   isConversationStatus,
   STATUS_LABELS,
   type ContactWithTags,
   type Conversation,
+  type ConversationEvent,
   type ConversationItem,
   type Message,
 } from "@/lib/crm/types";
@@ -36,6 +42,8 @@ import { cn } from "@/lib/utils";
 import { ChatView } from "./chat-view";
 import type { ConversationActionsHandlers } from "./conversation-actions";
 import { ConversationList } from "./conversation-list";
+import { DeliveryContactCard } from "./delivery-contact-card";
+import type { StageActionInput } from "./stage-bar";
 
 /** Últimos N mensajes que se cargan al abrir una conversación. */
 const MESSAGE_LIMIT = 200;
@@ -43,9 +51,16 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 type ConversationPatch = Partial<Pick<Conversation, "status" | "assigned_to" | "is_pinned" | "unread_count">>;
 
-function upsertItem(list: ConversationItem[], item: ConversationItem): ConversationItem[] {
-  return [...list.filter((c) => c.id !== item.id), item].sort(compareConversations);
+function upsertItem(list: ConversationItem[], item: ConversationItem, filters: InboxFilters): ConversationItem[] {
+  return [...list.filter((c) => c.id !== item.id), item].sort(comparatorFor(filters));
 }
+
+const STAGE_TOASTS: Record<StageActionInput["action"], string> = {
+  take: "Tomaste el chat: ahora está en Ventas",
+  to_delivery: "El chat pasó a Reparto",
+  delivered: "Marcado como entregado",
+  back_to_sales: "Devuelto a Ventas",
+};
 
 function upsertMessage(list: Message[], message: Message): Message[] {
   const index = list.findIndex((m) => m.id === message.id);
@@ -58,7 +73,7 @@ function upsertMessage(list: Message[], message: Message): Message[] {
 export function Inbox() {
   const supabase = createClient();
   const searchParams = useSearchParams();
-  const { me, profiles, tags, loading: crmLoading } = useCrm();
+  const { me, profiles, tags, isDelivery, loading: crmLoading } = useCrm();
   const { setActiveConversationId } = useNotifications();
   // ≥ 1024 px: lista y chat lado a lado (lo resuelve el CSS). ≥ 1536 px: además la ficha como columna.
   const isXl = useMediaQuery("(min-width: 1536px)");
@@ -67,7 +82,17 @@ export function Inbox() {
   const myId = me?.id ?? null;
 
   // --- Estado ----------------------------------------------------------------
-  const [filters, setFilters] = useState<InboxFilters>(DEFAULT_FILTERS);
+  const [chosenFilters, setFilters] = useState<InboxFilters>(DEFAULT_FILTERS);
+  // El repartidor tiene UNA lista fija (sus chats en reparto, los más antiguos
+  // primero); solo conserva la búsqueda.
+  const filters = useMemo(
+    () => (isDelivery ? { ...DELIVERY_FILTERS, search: chosenFilters.search } : chosenFilters),
+    [isDelivery, chosenFilters],
+  );
+  const [stageCounts, setStageCounts] = useState<StageCounts | null>(null);
+  const [events, setEvents] = useState<ConversationEvent[]>([]);
+  /** El chat pedido por URL no existe o el rol no tiene acceso. */
+  const [deniedId, setDeniedId] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [items, setItems] = useState<ConversationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,6 +179,17 @@ export function Inbox() {
     })();
   }, [supabase, filters, myId, crmLoading, reloadKey]);
 
+  // Contadores de las pestañas por etapa (vendedor y administración).
+  const loadStageCounts = useCallback(() => {
+    fetchStageCounts(supabase)
+      .then(setStageCounts)
+      .catch(() => undefined);
+  }, [supabase]);
+  useEffect(() => {
+    if (crmLoading || isDelivery) return;
+    loadStageCounts();
+  }, [crmLoading, isDelivery, loadStageCounts]);
+
   const loadMore = useCallback(async () => {
     if (loading || loadingMore || !hasMore) return;
     const request = requestRef.current;
@@ -161,7 +197,7 @@ export function Inbox() {
     try {
       const page = await fetchConversationPage(supabase, filters, myId, items.length);
       if (request !== requestRef.current) return;
-      setItems((prev) => page.reduce(upsertItem, prev));
+      setItems((prev) => page.reduce((list, item) => upsertItem(list, item, filters), prev));
       setHasMore(page.length === PAGE_SIZE);
     } catch (error) {
       toast.error(errorMessage(error, "No se pudieron cargar más conversaciones"));
@@ -191,6 +227,7 @@ export function Inbox() {
     (id: string, conv: ConversationItem | null) => {
       if (selectedIdRef.current !== id) return;
       setCurrent(conv);
+      setDeniedId(conv ? null : id);
       if (conv && conv.unread_count > 0 && document.visibilityState === "visible") void markRead(id);
     },
     [markRead],
@@ -220,6 +257,11 @@ export function Inbox() {
         if (!cancelled) applyCurrent(selectedId, conv);
       })
       .catch(() => toast.error("No se pudo abrir la conversación"));
+    fetchConversationEvents(supabase, selectedId)
+      .then((rows) => {
+        if (!cancelled) setEvents(rows);
+      })
+      .catch(() => undefined);
     supabase
       .from("messages")
       .select("*")
@@ -252,6 +294,20 @@ export function Inbox() {
   }, [markRead]);
 
   // --- Realtime ------------------------------------------------------------------
+  // Recarga los contadores por etapa, como mucho una vez por segundo.
+  const countsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countsRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    countsRef.current = () => {
+      if (isDelivery || countsTimer.current) return;
+      countsTimer.current = setTimeout(() => {
+        countsTimer.current = null;
+        loadStageCounts();
+      }, 1000);
+    };
+  }, [isDelivery, loadStageCounts]);
+  useEffect(() => () => clearTimeout(countsTimer.current ?? undefined), []);
+
   useEffect(() => {
     let channel: RealtimeChannel | null = null;
     let cancelled = false;
@@ -266,11 +322,12 @@ export function Inbox() {
           pending.delete(id);
           try {
             const match = await fetchConversationIfMatches(supabase, id, filtersRef.current, myIdRef.current);
-            setItems((prev) => (match ? upsertItem(prev, match) : prev.filter((c) => c.id !== id)));
+            setItems((prev) => (match ? upsertItem(prev, match, filtersRef.current) : prev.filter((c) => c.id !== id)));
           } catch {
             // Silencioso: el próximo evento lo corrige.
           }
           if (id === selectedIdRef.current) void loadCurrent(id);
+          countsRef.current();
         }, 150),
       );
     };
@@ -293,6 +350,11 @@ export function Inbox() {
             setMessages((prev) => upsertMessage(prev, payload.new));
           }
         })
+        .on<ConversationEvent>("postgres_changes", { event: "INSERT", schema: "public", table: "conversation_events" }, (payload) => {
+          if (payload.new.conversation_id === selectedIdRef.current) {
+            setEvents((prev) => (prev.some((e) => e.id === payload.new.id) ? prev : [...prev, payload.new]));
+          }
+        })
         .on<Message>("postgres_changes", { event: "UPDATE", schema: "public", table: "messages" }, (payload) => {
           if (payload.new.conversation_id === selectedIdRef.current) {
             setMessages((prev) => upsertMessage(prev, payload.new));
@@ -312,6 +374,8 @@ export function Inbox() {
   function selectConversation(id: string | null) {
     if (id === selectedId) return;
     setMessages([]);
+    setEvents([]);
+    setDeniedId(null);
     setLoadingMessages(id !== null);
     setCurrent(null);
     setSheetOpen(false);
@@ -334,7 +398,7 @@ export function Inbox() {
 
   function patchLocal(id: string, patch: ConversationPatch) {
     const apply = (c: ConversationItem) => (c.id === id ? { ...c, ...patch } : c);
-    setItems((prev) => prev.map(apply).sort(compareConversations));
+    setItems((prev) => prev.map(apply).sort(comparatorFor(filtersRef.current)));
     setCurrent((prev) => (prev ? apply(prev) : prev));
   }
 
@@ -398,6 +462,29 @@ export function Inbox() {
       : undefined,
   });
 
+  /** Acción de etapa (la valida public.change_conversation_stage en la base). */
+  async function handleStageAction(item: ConversationItem, input: StageActionInput): Promise<boolean> {
+    const { data, error } = await supabase.rpc("change_conversation_stage", {
+      p_conversation_id: item.id,
+      p_action: input.action,
+      p_delivery_user_id: input.deliveryUserId ?? undefined,
+      p_note: input.note ?? undefined,
+    });
+    if (error || !data) {
+      toast.error(errorMessage(error, "No se pudo cambiar la etapa"));
+      return false;
+    }
+    const row = data as Conversation;
+    const apply = (c: ConversationItem) => (c.id === item.id ? { ...c, ...row, contact: c.contact } : c);
+    setItems((prev) => prev.map(apply));
+    setCurrent((prev) => (prev ? apply(prev) : prev));
+    toast.success(STAGE_TOASTS[input.action]);
+    // Un repartidor que entrega o devuelve el chat deja de verlo.
+    if (isDelivery && (input.action === "delivered" || input.action === "back_to_sales")) selectConversation(null);
+    loadStageCounts();
+    return true;
+  }
+
   function handleSent(message: Message) {
     if (message.conversation_id === selectedIdRef.current) setMessages((prev) => upsertMessage(prev, message));
   }
@@ -419,7 +506,11 @@ export function Inbox() {
 
   // --- Render --------------------------------------------------------------------
   const details = selected?.contact ? (
-    <ContactDetails key={selected.contact.id} contact={selected.contact} onContactChange={handleContactChange} />
+    isDelivery ? (
+      <DeliveryContactCard contact={selected.contact} />
+    ) : (
+      <ContactDetails key={selected.contact.id} contact={selected.contact} onContactChange={handleContactChange} />
+    )
   ) : null;
 
   return (
@@ -439,6 +530,8 @@ export function Inbox() {
         selectedId={selectedId}
         now={now}
         filters={filters}
+        stageCounts={stageCounts}
+        deliveryMode={isDelivery}
         searchInput={searchInput}
         onSearchInput={setSearchInput}
         onFiltersChange={changeFilters}
@@ -452,6 +545,8 @@ export function Inbox() {
             key={selected.id}
             conversation={selected}
             messages={messages}
+            events={events}
+            onStageAction={(input) => handleStageAction(selected, input)}
             loadingMessages={loadingMessages}
             now={now}
             detailsOpen={isXl ? panelOpen : sheetOpen}
@@ -461,6 +556,20 @@ export function Inbox() {
             onReloadContact={() => selected.contact && reloadContact(selected.contact.id)}
             {...actionsFor(selected)}
           />
+        ) : selectedId && deniedId === selectedId ? (
+          <div className="flex flex-1 items-center justify-center bg-superficie-2/50">
+            <EmptyState
+              tone="error"
+              icon="bandeja"
+              title="No tienes acceso a este chat"
+              description="No existe o no está disponible para tu rol."
+              action={
+                <Button variant="outline" size="sm" onClick={() => selectConversation(null)}>
+                  Volver a la bandeja
+                </Button>
+              }
+            />
+          </div>
         ) : selectedId ? (
           <div className="flex-1 bg-background" aria-label="Cargando conversación" />
         ) : (

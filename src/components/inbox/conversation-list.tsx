@@ -22,12 +22,20 @@ import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { initialsOf } from "@/lib/crm/avatar";
-import { countAdvancedFilters, DEFAULT_FILTERS, type InboxFilters, type QuickFilter } from "@/lib/crm/conversations";
+import {
+  countAdvancedFilters,
+  DEFAULT_FILTERS,
+  type InboxFilters,
+  type QuickFilter,
+  type StageCounts,
+  type StageFilter,
+} from "@/lib/crm/conversations";
 import type { ConversationItem } from "@/lib/crm/types";
-import { formatListTime, formatPhone } from "@/lib/format";
+import { formatDateTime, formatListTime, formatPhone } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { ConversationActionsMenu, type ConversationActionsHandlers } from "./conversation-actions";
 import { ConversationFilters } from "./conversation-filters";
+import { StageChip } from "./stage-bar";
 
 /** Icono de la vista previa según el tipo del último mensaje. */
 const PREVIEW_ICONS: Record<string, LucideIcon> = {
@@ -37,6 +45,14 @@ const PREVIEW_ICONS: Record<string, LucideIcon> = {
   document: FileTextIcon,
   sticker: StickerIcon,
 };
+
+/** Pestañas por etapa (vendedor y administración). */
+const STAGE_TABS: { value: StageFilter; label: string }[] = [
+  { value: "sin_asignar", label: "Sin asignar" },
+  { value: "ventas", label: "Ventas" },
+  { value: "reparto", label: "Reparto" },
+  { value: "all", label: "Todos" },
+];
 
 const QUICK_FILTERS: { value: QuickFilter; label: string }[] = [
   { value: "all", label: "Todas" },
@@ -56,6 +72,10 @@ type Props = {
   selectedId: string | null;
   now: number | null;
   filters: InboxFilters;
+  /** Conteos por etapa para las pestañas (null mientras cargan). */
+  stageCounts: StageCounts | null;
+  /** Repartidor: una sola lista de sus chats en reparto, sin filtros ni pestañas. */
+  deliveryMode: boolean;
   /** Texto del buscador (se aplica con retardo en filters.search). */
   searchInput: string;
   onSearchInput: (value: string) => void;
@@ -76,6 +96,8 @@ export function ConversationList({
   selectedId,
   now,
   filters,
+  stageCounts,
+  deliveryMode,
   searchInput,
   onSearchInput,
   onFiltersChange,
@@ -85,7 +107,9 @@ export function ConversationList({
 }: Props) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const { unreadConversations } = useNotifications();
-  const isFiltered = filters.search.trim() !== "" || filters.quick !== "all" || countAdvancedFilters(filters) > 0;
+  const isFiltered =
+    filters.search.trim() !== "" ||
+    (!deliveryMode && (filters.quick !== "all" || filters.stage !== "all" || countAdvancedFilters(filters) > 0));
 
   // Scroll infinito: al ver el final de la lista se pide la siguiente página.
   useEffect(() => {
@@ -101,7 +125,10 @@ export function ConversationList({
   return (
     <aside className={cn("flex min-h-0 flex-col border-r bg-background", className)} aria-label="Conversaciones">
       <div className="space-y-3 px-4 pt-5 pb-3">
-        <h1 className="text-2xl font-bold tracking-tight">Bandeja</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Bandeja</h1>
+          {deliveryMode && <p className="text-sm text-texto-suave">Tus chats en reparto, los más antiguos primero.</p>}
+        </div>
 
         <div className="flex items-center gap-1">
           <div className="relative flex-1">
@@ -128,47 +155,82 @@ export function ConversationList({
               </button>
             )}
           </div>
-          <ConversationFilters filters={filters} onChange={onFiltersChange} />
+          {!deliveryMode && <ConversationFilters filters={filters} onChange={onFiltersChange} />}
         </div>
 
-        {/* Filtros rápidos */}
-        {/* Una sola fila: si no cabe, se desplaza en horizontal sin barra visible */}
-        <div
-          className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          role="group"
-          aria-label="Filtro rápido"
-        >
-          {QUICK_FILTERS.map((q) => {
-            const active = filters.quick === q.value;
-            const count = q.value === "unread" ? unreadConversations : 0;
-            return (
-              <button
-                key={q.value}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onFiltersChange({ quick: q.value })}
-                className={cn(
-                  "inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[0.8125rem] font-medium whitespace-nowrap transition-colors",
-                  active
-                    ? "border-transparent bg-marca-fuerte text-white"
-                    : "border-borde-control bg-background text-texto hover:bg-superficie-2",
-                )}
-              >
-                {q.label}
-                {count > 0 && (
-                  <span
+        {!deliveryMode && (
+          <div className="-mx-4 border-b px-2" role="tablist" aria-label="Etapa">
+            <div className="flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {STAGE_TABS.map((t) => {
+                const active = filters.stage === t.value;
+                const count = stageCounts ? stageCounts[t.value] : null;
+                return (
+                  <button
+                    key={t.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => onFiltersChange({ stage: t.value })}
                     className={cn(
-                      "flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full px-1 text-[0.6875rem] font-semibold tabular-nums",
-                      active ? "bg-white text-marca-texto" : "bg-marca-fuerte text-white",
+                      "relative inline-flex h-9 shrink-0 items-center gap-1.5 px-2.5 text-[0.8125rem] font-medium whitespace-nowrap transition-colors",
+                      active ? "text-marca-texto" : "text-texto-suave hover:text-texto",
                     )}
                   >
-                    {count > 99 ? "99+" : count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+                    {t.label}
+                    {count !== null && <span className="text-xs tabular-nums opacity-80">{count}</span>}
+                    <span
+                      className={cn(
+                        "absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-marca transition-opacity",
+                        active ? "opacity-100" : "opacity-0",
+                      )}
+                      aria-hidden
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Filtros rápidos. Una sola fila: si no cabe, se desplaza en horizontal sin barra visible */}
+        {!deliveryMode && (
+          <div
+            className="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="group"
+            aria-label="Filtro rápido"
+          >
+            {QUICK_FILTERS.map((q) => {
+              const active = filters.quick === q.value;
+              const count = q.value === "unread" ? unreadConversations : 0;
+              return (
+                <button
+                  key={q.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onFiltersChange({ quick: q.value })}
+                  className={cn(
+                    "inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[0.8125rem] font-medium whitespace-nowrap transition-colors",
+                    active
+                      ? "border-transparent bg-marca-fuerte text-white"
+                      : "border-borde-control bg-background text-texto hover:bg-superficie-2",
+                  )}
+                >
+                  {q.label}
+                  {count > 0 && (
+                    <span
+                      className={cn(
+                        "flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full px-1 text-[0.6875rem] font-semibold tabular-nums",
+                        active ? "bg-white text-marca-texto" : "bg-marca-fuerte text-white",
+                      )}
+                    >
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -188,7 +250,9 @@ export function ConversationList({
           />
         )}
 
-        {!loading && !error && items.length === 0 &&
+        {!loading &&
+          !error &&
+          items.length === 0 &&
           (isFiltered ? (
             <EmptyState
               icon={SearchXIcon}
@@ -206,6 +270,12 @@ export function ConversationList({
                   Limpiar filtros
                 </Button>
               }
+            />
+          ) : deliveryMode ? (
+            <EmptyState
+              icon="vacio-bandeja"
+              title="Sin entregas pendientes"
+              description="Cuando un vendedor pase un chat a Reparto, aparecerá aquí y te llegará un aviso."
             />
           ) : (
             <EmptyState
@@ -225,6 +295,8 @@ export function ConversationList({
                 now={now}
                 onSelect={() => onSelect(item.id)}
                 handlers={actionsFor(item)}
+                showStage={!deliveryMode && filters.stage === "all"}
+                deliveryMode={deliveryMode}
               />
             ))}
           </ul>
@@ -247,12 +319,16 @@ function ConversationRow({
   now,
   onSelect,
   handlers,
+  showStage,
+  deliveryMode,
 }: {
   item: ConversationItem;
   selected: boolean;
   now: number | null;
   onSelect: () => void;
   handlers: ConversationActionsHandlers;
+  showStage: boolean;
+  deliveryMode: boolean;
 }) {
   const { profiles } = useCrm();
   const contact = item.contact;
@@ -307,8 +383,12 @@ function ConversationRow({
               </span>
             )}
           </div>
-          {(visibleTags.length > 0 || assignee) && (
+          {deliveryMode && item.stage_changed_at && (
+            <p className="text-xs text-texto-suave">En reparto desde {formatDateTime(item.stage_changed_at)}</p>
+          )}
+          {(visibleTags.length > 0 || assignee || showStage) && (
             <div className="flex items-center gap-1 pt-0.5">
+              {showStage && <StageChip stage={item.stage} />}
               {visibleTags.map((tag) => (
                 <TagChip key={tag.id} tag={tag} size="xs" />
               ))}
@@ -327,11 +407,13 @@ function ConversationRow({
           )}
         </div>
       </button>
-      <ConversationActionsMenu
-        conversation={item}
-        {...handlers}
-        triggerClassName="absolute top-2 right-2 size-7 bg-background/90 opacity-0 backdrop-blur group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-      />
+      {!deliveryMode && (
+        <ConversationActionsMenu
+          conversation={item}
+          {...handlers}
+          triggerClassName="absolute top-2 right-2 size-7 bg-background/90 opacity-0 backdrop-blur group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+        />
+      )}
     </li>
   );
 }

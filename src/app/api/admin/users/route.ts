@@ -1,29 +1,53 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/auth";
-import { isAdminRole } from "@/lib/crm/types";
+import { isAssignableRole } from "@/lib/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// Gestión de usuarios (solo admin). Usa la service role ÚNICAMENTE después de
-// verificar sesión y rol; nunca se expone al navegador. Los cambios de rol no
-// pasan por aquí: se hacen con la sesión del admin y los valida la base (RLS + trigger).
+// Gestión de usuarios (solo administrador y superadmin). Nada se borra: al
+// desactivar se conserva el historial.
+// - Los cambios de rol, puesto y estado se guardan con la SESIÓN del admin: la
+//   base los valida (RLS + trigger profiles_protect_role: no tocar al proveedor,
+//   no desactivarse a sí mismo, no dejar el sistema sin administradores activos).
+// - La service role solo se usa DESPUÉS de verificar sesión y rol, para lo que
+//   vive en Auth: correos, invitar, bloquear el acceso y cerrar sesiones.
 
 export type AdminUser = {
   id: string;
   email: string | null;
   full_name: string | null;
   role: string;
+  job_title: string | null;
+  is_active: boolean;
+  avatar_color: number | null;
+  avatar_emoji: string | null;
   created_at: string;
   last_sign_in_at: string | null;
+  /** Invitado que aún no define su contraseña. */
+  invite_pending: boolean;
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD = 8;
+/** Bloqueo en Auth al desactivar (~100 años). */
+const BAN_FOREVER = "876000h";
 
 function deny(status: number, error: string) {
   return NextResponse.json({ error }, { status });
 }
 
-/** Lista de usuarios con su correo (el correo solo vive en auth.users). */
+function cleanJobTitle(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") return null;
+  const text = value.trim().slice(0, 60);
+  return text || null;
+}
+
+/** Mensaje claro a partir del error de la base (los triggers ya traen texto en español). */
+function dbError(error: { code?: string; message?: string }, fallback: string): string {
+  if (error.code === "42501" || error.code === "P0001") return error.message ?? fallback;
+  return fallback;
+}
+
+/** Lista de usuarios con su correo. El superadmin solo aparece para otro superadmin (RLS). */
 export async function GET() {
   const check = await requireAdmin();
   if (!check.ok) return deny(check.status, check.error);
@@ -31,92 +55,127 @@ export async function GET() {
   const admin = createAdminClient();
   const [{ data: authData, error: authError }, { data: profiles, error: profilesError }] = await Promise.all([
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-    admin.from("profiles").select("*").order("created_at"),
+    // Con la sesión del admin: RLS oculta al proveedor.
+    check.supabase.from("profiles").select("*").order("created_at"),
   ]);
   if (authError || profilesError) {
     console.error("[admin-users] Error al listar usuarios");
     return deny(500, "No se pudieron cargar los usuarios");
   }
 
-  const emails = new Map(authData.users.map((u) => [u.id, u]));
-  const users: AdminUser[] = profiles.map((p) => ({
-    id: p.id,
-    email: emails.get(p.id)?.email ?? null,
-    full_name: p.full_name,
-    role: p.role,
-    created_at: p.created_at,
-    last_sign_in_at: emails.get(p.id)?.last_sign_in_at ?? null,
-  }));
+  const authById = new Map(authData.users.map((u) => [u.id, u]));
+  const users: AdminUser[] = profiles.map((p) => {
+    const auth = authById.get(p.id);
+    return {
+      id: p.id,
+      email: auth?.email ?? null,
+      full_name: p.full_name,
+      role: p.role,
+      job_title: p.job_title,
+      is_active: p.is_active,
+      avatar_color: p.avatar_color,
+      avatar_emoji: p.avatar_emoji,
+      created_at: p.created_at,
+      last_sign_in_at: auth?.last_sign_in_at ?? null,
+      invite_pending: Boolean(auth?.invited_at) && !auth?.last_sign_in_at,
+    };
+  });
   return NextResponse.json({ users });
 }
 
-/** Crea un usuario con correo y contraseña temporal. */
+/**
+ * Invita por correo (o reenvía la invitación) con rol y puesto. El enlace
+ * lleva a /auth/confirm → /definir-contrasena.
+ */
 export async function POST(request: NextRequest) {
   const check = await requireAdmin();
   if (!check.ok) return deny(check.status, check.error);
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const password = typeof body.password === "string" ? body.password : "";
-  const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
-  const role = body.role === "admin" ? "admin" : "agent";
+  const fullName = typeof body.fullName === "string" ? body.fullName.trim().slice(0, 80) : "";
+  const jobTitle = cleanJobTitle(body.jobTitle) ?? null;
+  const role = body.role;
 
   if (!EMAIL_RE.test(email)) return deny(400, "Correo no válido");
-  if (password.length < MIN_PASSWORD) return deny(400, `La contraseña debe tener al menos ${MIN_PASSWORD} caracteres`);
+  if (!isAssignableRole(role)) return deny(400, "Rol no válido");
 
   const admin = createAdminClient();
-  const { data, error } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { full_name: fullName || email },
+  const redirectTo = `${request.nextUrl.origin}/auth/confirm?next=/definir-contrasena`;
+  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+    redirectTo,
+    data: { full_name: fullName || email },
   });
   if (error || !data.user) {
-    // No se registra el correo ni la contraseña en los logs.
-    console.error(`[admin-users] No se pudo crear el usuario (${error?.status ?? "?"})`);
-    const exists = error?.message?.toLowerCase().includes("already");
-    return deny(exists ? 409 : 400, exists ? "Ya existe un usuario con ese correo" : "No se pudo crear el usuario");
+    // Nunca se registra el correo en los logs.
+    console.error(`[admin-users] No se pudo invitar (${error?.status ?? "?"} ${error?.code ?? ""})`);
+    const exists = error?.code === "email_exists" || error?.message?.toLowerCase().includes("already");
+    if (error?.status === 429) return deny(429, "Se enviaron demasiados correos. Espera un momento.");
+    return deny(
+      exists ? 409 : 400,
+      exists ? "Ya existe un usuario con ese correo" : "No se pudo enviar la invitación. Revisa la configuración de correo.",
+    );
   }
 
-  // El trigger on_auth_user_created crea el perfil como "agent".
-  if (role === "admin") {
-    const { error: roleError } = await admin.from("profiles").update({ role: "admin" }).eq("id", data.user.id);
-    if (roleError) console.error("[admin-users] Usuario creado, pero no se pudo asignar el rol admin");
+  // El trigger crea el perfil INACTIVO; aquí se activa con su rol (ya validado arriba).
+  const { error: profileError } = await admin
+    .from("profiles")
+    .update({ role, job_title: jobTitle, is_active: true, ...(fullName ? { full_name: fullName } : {}) })
+    .eq("id", data.user.id);
+  if (profileError) {
+    console.error("[admin-users] Invitado, pero no se pudo asignar el perfil");
+    return deny(500, "Se envió la invitación, pero no se pudo asignar el rol. Revísalo en la lista.");
   }
-
   return NextResponse.json({ id: data.user.id }, { status: 201 });
 }
 
-/** Elimina un usuario (?id=). No se puede eliminar a uno mismo ni al último admin. */
-export async function DELETE(request: NextRequest) {
+/** Cambia rol, puesto o estado (activo/inactivo) de un usuario. */
+export async function PATCH(request: NextRequest) {
   const check = await requireAdmin();
   if (!check.ok) return deny(check.status, check.error);
 
-  const id = request.nextUrl.searchParams.get("id") ?? "";
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const id = typeof body.id === "string" ? body.id : "";
   if (!/^[0-9a-f-]{36}$/i.test(id)) return deny(400, "Id no válido");
-  if (id === check.userId) return deny(400, "No puedes eliminar tu propia cuenta");
 
-  const admin = createAdminClient();
-  const { data: target } = await admin.from("profiles").select("role").eq("id", id).maybeSingle();
-  // Al proveedor (superadmin) solo lo puede eliminar otro superadmin.
-  if (target?.role === "superadmin") {
-    const { data: requester } = await admin.from("profiles").select("role").eq("id", check.userId).maybeSingle();
-    if (requester?.role !== "superadmin") return deny(403, "Solo el proveedor puede eliminar esta cuenta");
+  const patch: { role?: string; job_title?: string | null; is_active?: boolean } = {};
+  if (body.role !== undefined) {
+    if (!isAssignableRole(body.role)) return deny(400, "Rol no válido");
+    patch.role = body.role;
   }
-  if (isAdminRole(target?.role)) {
-    const { count } = await admin
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .in("role", ["admin", "superadmin"]);
-    if ((count ?? 0) <= 1) return deny(400, "Debe quedar al menos un administrador");
+  const jobTitle = cleanJobTitle(body.jobTitle);
+  if (jobTitle !== undefined) patch.job_title = jobTitle;
+  if (body.active !== undefined) {
+    if (typeof body.active !== "boolean") return deny(400, "Estado no válido");
+    if (!body.active && id === check.userId) return deny(400, "No puedes desactivar tu propia cuenta");
+    patch.is_active = body.active;
   }
+  if (Object.keys(patch).length === 0) return deny(400, "Nada que cambiar");
 
-  // Borra auth.users; profiles se elimina en cascada y sus conversaciones,
-  // mensajes y notas conservan el historial (assigned_to/sender_id/author_id → null).
-  const { error } = await admin.auth.admin.deleteUser(id);
-  if (error) {
-    console.error(`[admin-users] No se pudo eliminar el usuario (${error.status ?? "?"})`);
-    return deny(500, "No se pudo eliminar el usuario");
+  // Con la sesión del admin: RLS y el trigger deciden.
+  const { data: updated, error } = await check.supabase
+    .from("profiles")
+    .update(patch)
+    .eq("id", id)
+    .select("id, is_active")
+    .maybeSingle();
+  if (error) return deny(400, dbError(error, "No se pudo guardar el cambio"));
+  if (!updated) return deny(404, "Usuario no encontrado");
+
+  if (patch.is_active !== undefined) {
+    const admin = createAdminClient();
+    const { error: banError } = await admin.auth.admin.updateUserById(id, {
+      ban_duration: patch.is_active ? "none" : BAN_FOREVER,
+    });
+    if (banError) {
+      console.error(`[admin-users] No se pudo actualizar el bloqueo en Auth (${banError.status ?? "?"})`);
+      // El perfil ya quedó inactivo: RLS le niega todo aunque Auth falle.
+      return deny(500, "El estado se guardó, pero no se pudo actualizar el acceso. Inténtalo de nuevo.");
+    }
+    if (!patch.is_active) {
+      const { error: revokeError } = await admin.rpc("admin_revoke_sessions", { p_user_id: id });
+      if (revokeError) console.error("[admin-users] No se pudieron cerrar las sesiones");
+    }
   }
   return NextResponse.json({ ok: true });
 }

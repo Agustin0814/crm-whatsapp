@@ -1173,6 +1173,54 @@ export type Database = {
         }
         Relationships: []
       }
+      conversation_events: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          from_stage: string | null
+          id: string
+          note: string | null
+          to_stage: string | null
+          type: string
+          user_id: string | null
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          from_stage?: string | null
+          id?: string
+          note?: string | null
+          to_stage?: string | null
+          type: string
+          user_id?: string | null
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          from_stage?: string | null
+          id?: string
+          note?: string | null
+          to_stage?: string | null
+          type?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversation_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversation_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversations: {
         Row: {
           agent_consecutive_count: number
@@ -1181,6 +1229,7 @@ export type Database = {
           assigned_to: string | null
           contact_id: string
           created_at: string
+          delivery_user_id: string | null
           human_seen_at: string | null
           id: string
           is_pinned: boolean
@@ -1188,6 +1237,8 @@ export type Database = {
           last_message_at: string | null
           last_message_preview: string | null
           last_message_type: string | null
+          stage: string
+          stage_changed_at: string | null
           status: string
           unread_count: number
         }
@@ -1198,6 +1249,7 @@ export type Database = {
           assigned_to?: string | null
           contact_id: string
           created_at?: string
+          delivery_user_id?: string | null
           human_seen_at?: string | null
           id?: string
           is_pinned?: boolean
@@ -1205,6 +1257,8 @@ export type Database = {
           last_message_at?: string | null
           last_message_preview?: string | null
           last_message_type?: string | null
+          stage?: string
+          stage_changed_at?: string | null
           status?: string
           unread_count?: number
         }
@@ -1215,6 +1269,7 @@ export type Database = {
           assigned_to?: string | null
           contact_id?: string
           created_at?: string
+          delivery_user_id?: string | null
           human_seen_at?: string | null
           id?: string
           is_pinned?: boolean
@@ -1222,6 +1277,8 @@ export type Database = {
           last_message_at?: string | null
           last_message_preview?: string | null
           last_message_type?: string | null
+          stage?: string
+          stage_changed_at?: string | null
           status?: string
           unread_count?: number
         }
@@ -1238,6 +1295,13 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: true
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_delivery_user_id_fkey"
+            columns: ["delivery_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -1589,6 +1653,54 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          body: string | null
+          conversation_id: string | null
+          created_at: string
+          id: string
+          kind: string
+          read_at: string | null
+          recipient_id: string
+          title: string
+        }
+        Insert: {
+          body?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          read_at?: string | null
+          recipient_id: string
+          title: string
+        }
+        Update: {
+          body?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          read_at?: string | null
+          recipient_id?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       order_items: {
         Row: {
           description: string
@@ -1913,24 +2025,50 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_color: number | null
+          avatar_emoji: string | null
           created_at: string
+          deactivated_at: string | null
+          deactivated_by: string | null
           full_name: string | null
           id: string
+          is_active: boolean
+          job_title: string | null
           role: string
         }
         Insert: {
+          avatar_color?: number | null
+          avatar_emoji?: string | null
           created_at?: string
+          deactivated_at?: string | null
+          deactivated_by?: string | null
           full_name?: string | null
           id: string
+          is_active?: boolean
+          job_title?: string | null
           role?: string
         }
         Update: {
+          avatar_color?: number | null
+          avatar_emoji?: string | null
           created_at?: string
+          deactivated_at?: string | null
+          deactivated_by?: string | null
           full_name?: string | null
           id?: string
+          is_active?: boolean
+          job_title?: string | null
           role?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_deactivated_by_fkey"
+            columns: ["deactivated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       quick_replies: {
         Row: {
@@ -1940,6 +2078,7 @@ export type Database = {
           created_by: string | null
           id: string
           shortcut: string
+          visible_para: string
           when_to_use: string | null
         }
         Insert: {
@@ -1949,6 +2088,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           shortcut: string
+          visible_para?: string
           when_to_use?: string | null
         }
         Update: {
@@ -1958,6 +2098,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           shortcut?: string
+          visible_para?: string
           when_to_use?: string | null
         }
         Relationships: [
@@ -2104,6 +2245,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      admin_revoke_sessions: { Args: { p_user_id: string }; Returns: undefined }
       agent_answered_through: {
         Args: { p_conversation_id: string }
         Returns: string
@@ -2111,6 +2253,10 @@ export type Database = {
       agent_burst_start: {
         Args: { p_conversation_id: string; p_gap_seconds: number }
         Returns: string
+      }
+      agent_handoff_to_sales: {
+        Args: { p_conversation_id: string }
+        Returns: undefined
       }
       agent_limits: { Args: { p_key: string }; Returns: Json }
       agent_usage_summary: { Args: { p_key: string }; Returns: Json }
@@ -2172,6 +2318,40 @@ export type Database = {
         }
       }
       cancel_notes_backfill: { Args: { p_agent_key: string }; Returns: number }
+      change_conversation_stage: {
+        Args: {
+          p_action: string
+          p_conversation_id: string
+          p_delivery_user_id?: string
+          p_note?: string
+        }
+        Returns: {
+          agent_consecutive_count: number
+          agent_paused: boolean
+          agent_paused_reason: string | null
+          assigned_to: string | null
+          contact_id: string
+          created_at: string
+          delivery_user_id: string | null
+          human_seen_at: string | null
+          id: string
+          is_pinned: boolean
+          last_inbound_at: string | null
+          last_message_at: string | null
+          last_message_preview: string | null
+          last_message_type: string | null
+          stage: string
+          stage_changed_at: string | null
+          status: string
+          unread_count: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "conversations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       claim_agent_runs: {
         Args: { p_limit?: number }
         Returns: {
@@ -2239,6 +2419,14 @@ export type Database = {
           contacts: number
           customers: number
           inactive_customers: number
+        }[]
+      }
+      conversation_stage_counts: {
+        Args: never
+        Returns: {
+          stage: string
+          total: number
+          unread: number
         }[]
       }
       create_agent_request: {
@@ -2438,7 +2626,9 @@ export type Database = {
           p_from?: string
           p_limit?: number
           p_offset?: number
+          p_order?: string
           p_search?: string
+          p_stages?: string[]
           p_statuses?: string[]
           p_tag_ids?: string[]
           p_to?: string
@@ -2452,6 +2642,7 @@ export type Database = {
           assigned_to: string | null
           contact_id: string
           created_at: string
+          delivery_user_id: string | null
           human_seen_at: string | null
           id: string
           is_pinned: boolean
@@ -2459,6 +2650,8 @@ export type Database = {
           last_message_at: string | null
           last_message_preview: string | null
           last_message_type: string | null
+          stage: string
+          stage_changed_at: string | null
           status: string
           unread_count: number
         }[]
@@ -2516,6 +2709,7 @@ export type Database = {
           assigned_to: string | null
           contact_id: string
           created_at: string
+          delivery_user_id: string | null
           human_seen_at: string | null
           id: string
           is_pinned: boolean
@@ -2523,6 +2717,8 @@ export type Database = {
           last_message_at: string | null
           last_message_preview: string | null
           last_message_type: string | null
+          stage: string
+          stage_changed_at: string | null
           status: string
           unread_count: number
         }

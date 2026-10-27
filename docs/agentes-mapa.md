@@ -226,22 +226,31 @@ select status, return_message, start_time from cron.job_run_details order by sta
 8. **Prompt y modelo:** `buildSystemPrompt` (`prompt.ts`) con la capa del proveedor, el nombre y el tono del cliente y solo las respuestas rápidas que cumplen la regla efectiva; luego `generateReply` (`providers/openai.ts`).
 9. **Resultado**, según la herramienta elegida:
    - `responder_texto_corto` o `enviar_respuesta_rapida` → **responde** en automático con `sendAgentText` (`send.ts`) o **sugiere** en modo sugerencia guardando en `agent_suggestions`. Una respuesta rápida «con aprobación» siempre queda como sugerencia.
-   - `transferir_a_humano` → **transfiere**: entrega o sugiere el mensaje de traspaso, pausa el chat, asigna si está configurado y avisa (`engine.ts`, `handoff`).
+   - `transferir_a_humano` → **transfiere**: entrega o sugiere el mensaje de traspaso, pausa el chat, asigna si está configurado, pasa el chat a la etapa **Ventas** (`rpc("agent_handoff_to_sales")`: evento `a_ventas` con `user_id` null y aviso a los vendedores) y avisa (`engine.ts`, `handoff`).
    - Una herramienta no permitida o un error → **error** en el registro (y aviso al proveedor si es un error del modelo).
 10. **Sugerencia en el chat:** el banner (`agent-suggestion-banner.tsx`) llama a `/api/agents/suggestions/[id]` para enviar (tal cual o editada) o descartar.
 11. **Después:** el trigger `messages_agent_outbound` suma al contador de respuestas seguidas; la burbuja muestra el nombre del asistente (`message-list.tsx`); la corrida se cierra como `done` o `skipped`.
 
 ## 7. Qué ve cada rol
 
-| | Agente (persona) | Admin | Superadmin (proveedor) |
-|---|---|---|---|
-| Lista de agentes en `/agentes` | Sí, sin poder editar | Sí: enciende, apaga y cambia el modo | Sí |
-| Tarjetas de uso, avisos y registro de actividad | No | Sí | Sí (además, los avisos de errores y del tope de tokens) |
-| Panel «Configurar» → Configuración (cliente) | Lo ve deshabilitado | Edita | Edita |
-| Pestaña «Proveedor» (identidad, reglas, negocio, traspaso, modelo, techos, espera mín./máx., umbral, kill switch) | No existe | No existe | Edita |
-| «Cuándo usarla» y «Permiso del agente» en respuestas rápidas | No | No | Edita |
-| Respuestas `human_only` en el panel | — | Apagadas, con candado y «Solo tu equipo» | Las cambia en el editor de respuestas rápidas |
-| Chat: sugerencias, pausa y nombre del asistente | Sí | Sí | Sí |
+`/agentes` solo existe para administración (proxy + `canAccessPath`). Vendedor y repartidor no lo ven.
+
+| | Vendedor | Repartidor | Admin | Superadmin (proveedor) |
+|---|---|---|---|---|
+| Página `/agentes` | No | No | Sí: enciende, apaga y cambia el modo | Sí |
+| Tarjetas de uso, avisos y registro de actividad | No | No | Sí | Sí (además, los avisos de errores y del tope de tokens) |
+| Panel «Configurar» → Configuración (cliente) | — | — | Edita | Edita |
+| Pestaña «Proveedor» | No existe | No existe | No existe | Edita |
+| «Cuándo usarla» y «Permiso del agente» en respuestas rápidas | No | No | No | Edita |
+| Chat: sugerencias del asistente (`agent_suggestions`) | Sí | No (RLS) | Sí | Sí |
+| Chat: interruptor de pausa | Sí | No | Sí | Sí |
+| Asistente del sistema | Si `allowed_roles = admins_and_agents` («Administradores y vendedores») | Nunca | Sí | Sí |
+
+### Etapas del chat y agentes
+- **Pasar a Reparto** (`change_conversation_stage`, `to_delivery`) pausa al Asistente de respuestas con motivo `reparto` («En reparto»); **Marcar entregado** lo reanuda y reinicia el contador; **Devolver a Ventas** lo deja pausado (`devuelto_ventas`). Lo hace la función en la base, no el motor.
+- El **traspaso** del Asistente de respuestas pasa el chat a **Ventas** (ver paso 9).
+- El **Asistente de notas** no depende de la etapa: usa service role y su alcance es por clasificación y etiquetas.
+- `private.require_staff()` ahora excluye al repartidor: no puede usar el Asistente del sistema, ni pausar el asistente, ni confirmar solicitudes.
 
 ## 8. Asistente de notas
 

@@ -57,7 +57,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       "traspaso",
       "transferir a una persona"
     ],
-    "body": "El **Asistente de respuestas** contesta a los clientes en WhatsApp.\n\n## Cómo activarlo\n1. Ve a **Agentes**.\n2. En la fila del Asistente de respuestas, cambia **Estado** a **Activo** (solo administradores).\n3. Elige el **Modo**: **Sugerencia** o **Automático**.\n4. Pulsa **Configurar** para ajustar cómo responde y pulsa **Guardar**.\n\n## Qué se configura\n- **Nombre:** cómo aparece en el chat (por defecto «Asistente»).\n- **Tono:** tú o usted, cercano o formal, emojis y largo de las respuestas.\n- **Cuándo responde:** siempre, fuera de horario o en un horario propio, y cuánto espera antes de contestar (Rápido 15 s, Normal 30 s, Pausado 2 min u otra). Si el cliente sigue escribiendo, la espera vuelve a empezar.\n- **A quién le responde:** por clasificación (por defecto Sin clasificar y Prospecto) y etiquetas excluidas.\n- **Límites:** respuestas seguidas (por defecto 5) y tope por día.\n- **Respuestas rápidas que puede usar:** solo las que enciendas. Las marcadas «Solo tu equipo» no se pueden encender.\n- **Avisos:** al pasar un chat a una persona, al llegar al límite del día y al acercarse al del mes.\n\n## En el chat\n- En modo Sugerencia aparece «Sugerencia del asistente» sobre el cuadro de escritura, con **Enviar**, **Editar** y **Descartar**.\n- El interruptor del encabezado del chat pausa o reanuda el asistente en ese chat.\n- El asistente se pausa solo cuando una persona responde, cuando se asigna el chat o cuando llega al límite de respuestas seguidas.\n- Si el cliente pide una persona, o el asistente no sabe la respuesta, **pasa el chat a una persona** y se pausa.\n- Solo responde dentro de la ventana de 24 horas."
+    "body": "El **Asistente de respuestas** contesta a los clientes en WhatsApp.\n\n## Cómo activarlo\n1. Ve a **Agentes**.\n2. En la fila del Asistente de respuestas, cambia **Estado** a **Activo** (solo administradores).\n3. Elige el **Modo**: **Sugerencia** o **Automático**.\n4. Pulsa **Configurar** para ajustar cómo responde y pulsa **Guardar**.\n\n## Qué se configura\n- **Nombre:** cómo aparece en el chat (por defecto «Asistente»).\n- **Tono:** tú o usted, cercano o formal, emojis y largo de las respuestas.\n- **Cuándo responde:** siempre, fuera de horario o en un horario propio, y cuánto espera antes de contestar (Rápido 15 s, Normal 30 s, Pausado 2 min u otra). Si el cliente sigue escribiendo, la espera vuelve a empezar.\n- **A quién le responde:** por clasificación (por defecto Sin clasificar y Prospecto) y etiquetas excluidas.\n- **Límites:** respuestas seguidas (por defecto 5) y tope por día.\n- **Respuestas rápidas que puede usar:** solo las que enciendas. Las marcadas «Solo tu equipo» no se pueden encender.\n- **Avisos:** al pasar un chat a una persona, al llegar al límite del día y al acercarse al del mes.\n\n## En el chat\n- En modo Sugerencia aparece «Sugerencia del asistente» sobre el cuadro de escritura, con **Enviar**, **Editar** y **Descartar**.\n- El interruptor del encabezado del chat pausa o reanuda el asistente en ese chat.\n- El asistente se pausa solo cuando una persona responde, cuando se asigna el chat, cuando llega al límite de respuestas seguidas o cuando el chat pasa a **Reparto** («En reparto»). Al **Marcar entregado** se reanuda; si el chat se **Devuelve a Ventas**, sigue pausado.\n- Si el cliente pide una persona, o el asistente no sabe la respuesta, **pasa el chat a una persona**, se pausa y el chat entra a la etapa **Ventas** (los vendedores reciben un aviso).\n- Solo responde dentro de la ventana de 24 horas."
   },
   {
     "slug": "asistente-sistema",
@@ -98,9 +98,19 @@ export const HELP_ARTICLES: HelpArticle[] = [
       "plantilla",
       "adjuntar",
       "archivo",
-      "emoji"
+      "emoji",
+      "etapas",
+      "ventas",
+      "reparto",
+      "tomar",
+      "pasar a reparto",
+      "entregado",
+      "devolver a ventas",
+      "repartidor",
+      "llamar",
+      "avisos"
     ],
-    "body": "La **Bandeja** (primera opción del menú) muestra todas las conversaciones de WhatsApp. Hay una conversación por contacto.\n\n## Buscar y filtrar\n- El buscador encuentra por nombre, teléfono o texto de los mensajes.\n- Arriba de la lista están los filtros rápidos: **Todas**, **No leídas**, **Mías** y **Sin asignar**.\n- En **Filtros** puedes elegir estado, etiquetas (cualquiera de las elegidas), agente asignado y un rango de fechas del último mensaje.\n- Las conversaciones archivadas no aparecen salvo que elijas ese estado.\n\n## Dentro de un chat\n- Escribe en el cuadro de abajo y pulsa **Enter** o el botón de enviar.\n- Con el clip adjuntas archivos (también puedes arrastrarlos o pegarlos). Máximo 50 MB por archivo.\n- Escribe **/** para abrir las respuestas rápidas.\n- En **Más acciones** puedes **Fijar arriba**, **Marcar como no leída**, cambiar el estado (Abierta, Pendiente, Resuelta, Archivada) y **Asignar a** alguien del equipo.\n- El botón de notas cambia la vista a las notas internas del chat (ver «Notas internas»).\n\n## Ventana de 24 horas\nWhatsApp solo deja escribir texto libre durante las 24 horas siguientes al último mensaje del cliente. Si la ventana está cerrada, el chat lo avisa («La ventana de 24 h está cerrada») y bloquea el texto libre: hay que esperar a que el cliente escriba de nuevo o usar una plantilla aprobada por Meta.\n\n## Contactos sin WhatsApp\nUn contacto creado a mano sin número de WhatsApp no puede recibir mensajes desde el CRM."
+    "body": "La **Bandeja** (primera opción del menú) muestra las conversaciones de WhatsApp. Hay una conversación por contacto.\n\n## Etapas: Sin asignar, Ventas y Reparto\nCada chat está en una etapa. Arriba de la lista hay pestañas con el número de chats de cada una: **Sin asignar**, **Ventas**, **Reparto** y **Todos**. Bajo el encabezado del chat se ve su etapa y los botones que te corresponden:\n\n- **Tomar** (chat sin asignar; vendedores y administradores): te lo asigna y pasa a Ventas. Asignar a alguien un chat sin asignar también lo pasa a Ventas.\n- **Pasar a Reparto** (vendedores y administradores): muestra el resumen del cliente y las últimas notas para que revises dirección y cantidad. Puedes elegir un repartidor; si no eliges, lo ven todos los repartidores. El Asistente de respuestas se pausa en ese chat mientras está en reparto.\n- **Marcar entregado** (todos): el chat vuelve a Sin asignar, se quita la asignación y el Asistente de respuestas se reanuda.\n- **Devolver a Ventas** (todos), con un motivo opcional: el asistente sigue pausado.\n- Si el Asistente de respuestas pasa el chat a una persona, el chat entra a Ventas.\n\nCada cambio queda como una línea discreta en el chat, por ejemplo «Pasó a Reparto por Ana · 10:42». Solo la ve el equipo.\n\n## Avisos\nCon el sonido de siempre y un aviso en pantalla (con **Abrir**): los vendedores, cuando un chat entra a Ventas; los repartidores, cuando entra uno a Reparto. Nunca te avisa de lo que hiciste tú.\n\n## Bandeja del repartidor\nEl repartidor ve una sola lista con sus chats en Reparto, primero los que llevan más tiempo esperando. En el chat tiene el botón **Llamar** con el teléfono del cliente; si la ventana de 24 horas está cerrada, el teléfono se muestra destacado. La ficha del contacto es de solo lectura.\n\n## Buscar y filtrar\n- El buscador encuentra por nombre, teléfono o texto de los mensajes.\n- Filtros rápidos: **Todas**, **No leídas**, **Mías** y **Sin asignar** (sin persona asignada).\n- En **Filtros** puedes elegir estado, etiquetas (cualquiera de las elegidas), persona asignada y un rango de fechas del último mensaje.\n- Las conversaciones archivadas no aparecen salvo que elijas ese estado.\n\n## Dentro de un chat\n- Escribe en el cuadro de abajo y pulsa **Enter** o el botón de enviar.\n- Con el clip adjuntas archivos (también puedes arrastrarlos o pegarlos). Máximo 50 MB por archivo.\n- Escribe **/** para abrir las respuestas rápidas (solo aparecen las de tu rol).\n- En **Más acciones** puedes **Fijar arriba**, **Marcar como no leída**, cambiar el estado (Abierta, Pendiente, Resuelta, Archivada) y **Asignar a** alguien del equipo. El repartidor no tiene este menú.\n- El botón de notas cambia la vista a las notas internas del chat (ver «Notas internas»).\n- Si abres un enlace a un chat que no te corresponde, verás «No tienes acceso a este chat».\n\n## Ventana de 24 horas\nWhatsApp solo deja escribir texto libre durante las 24 horas siguientes al último mensaje del cliente. Si la ventana está cerrada, el chat lo avisa («La ventana de 24 h está cerrada») y bloquea el texto libre para todos los roles: hay que esperar a que el cliente escriba de nuevo o llamarle.\n\n## Contactos sin WhatsApp\nUn contacto creado a mano sin número de WhatsApp no puede recibir mensajes desde el CRM."
   },
   {
     "slug": "contactos",
@@ -181,9 +191,12 @@ export const HELP_ARTICLES: HelpArticle[] = [
       "nombre",
       "primer nombre",
       "insertar",
-      "barra"
+      "barra",
+      "visible para",
+      "vendedores",
+      "repartidores"
     ],
-    "body": "Las **respuestas rápidas** son textos guardados para no escribir lo mismo cada vez.\n\n- Se administran en Configuración → **Respuestas rápidas**. Crearlas, editarlas y borrarlas es solo para administradores; todos las pueden usar.\n- Cada una tiene un **Atajo** (minúsculas, números, guiones y guion bajo) y un **Texto**.\n- Variables que se reemplazan solas: `{{nombre}}`, `{{primer_nombre}}`, `{{telefono}}` y `{{empresa}}`. El editor muestra una vista previa con un contacto de ejemplo.\n- En el chat, escribe **/** y elige con ↑ ↓ y Enter (Esc cierra el menú).\n- El Asistente de respuestas solo puede usar las que el administrador encienda en su panel (ver «Asistente de respuestas»). Las nuevas nacen apagadas para el asistente."
+    "body": "Las **respuestas rápidas** son textos guardados para no escribir lo mismo cada vez.\n\n- Se administran en Configuración → **Respuestas rápidas**. Crearlas, editarlas y borrarlas es solo para administradores.\n- Cada una tiene un **Atajo** (minúsculas, números, guiones y guion bajo), un **Texto** y **Visible para** (casillas **Vendedores** y **Repartidores**; al menos una). Las que ya existían quedaron visibles para ambos.\n- En el menú **/** del chat cada persona solo ve las de su rol; los administradores las ven todas. Al enviar, el sistema vuelve a comprobarlo.\n- Variables que se reemplazan solas: `{{nombre}}`, `{{primer_nombre}}`, `{{telefono}}` y `{{empresa}}`. El editor muestra una vista previa con un contacto de ejemplo.\n- En el chat, escribe **/** y elige con ↑ ↓ y Enter (Esc cierra el menú).\n- El Asistente de respuestas solo puede usar las que el administrador encienda en su panel (ver «Asistente de respuestas»). Las nuevas nacen apagadas para el asistente."
   },
   {
     "slug": "usuarios-y-roles",
@@ -191,14 +204,22 @@ export const HELP_ARTICLES: HelpArticle[] = [
     "topics": [
       "usuarios",
       "roles",
+      "vendedor",
+      "repartidor",
       "administrador",
-      "agente",
       "proveedor",
       "permisos",
-      "crear usuario",
-      "contraseña temporal",
-      "eliminar usuario"
+      "invitar usuario",
+      "invitación",
+      "desactivar",
+      "reactivar",
+      "puesto",
+      "mi perfil",
+      "avatar",
+      "contraseña",
+      "olvidé mi contraseña",
+      "recuperar contraseña"
     ],
-    "body": "Hay tres roles:\n\n- **Agente:** usa la bandeja, contactos, etiquetas (sin borrarlas), sus notas y las respuestas rápidas. Ve la lista de asistentes, pero no los configura.\n- **Administrador:** además administra usuarios, borra etiquetas, crea y edita respuestas rápidas, configura los asistentes y ve uso, costos, avisos y el registro de actividad.\n- **Proveedor:** quien da soporte técnico al sistema. Solo otro proveedor puede asignar o quitar ese rol.\n\n## Administrar usuarios\nEn Configuración → **Usuarios** (solo administradores): **Nuevo usuario** con nombre, correo y contraseña temporal (mínimo 8 caracteres), cambiar rol y eliminar. El sistema nunca deja la cuenta sin administradores."
+    "body": "Hay cuatro roles:\n\n- **Vendedor:** ve todos los chats y contactos, toma chats, los pasa a Reparto, escribe notas y usa las respuestas rápidas para vendedores. Si el administrador lo permite, también usa el Asistente.\n- **Repartidor:** solo ve los chats que están en **Reparto** (y, si un vendedor eligió a un repartidor en concreto, solo ese repartidor). Ve el historial, las notas, el resumen del cliente y su teléfono. Puede marcar **Entregado** o **Devolver a Ventas**. No ve la lista de contactos, ni agentes, ni estadísticas, ni usuarios.\n- **Administrador:** todo lo anterior y además usuarios, agentes, estadísticas y la configuración general (etiquetas, respuestas rápidas, funciones, contactos y ventas).\n- **Proveedor:** quien da soporte técnico al sistema. No aparece en la lista de usuarios.\n\n## Administrar usuarios\nEn Configuración → **Usuarios** (solo administradores):\n\n- **Invitar usuario:** escribe el correo, el nombre, el rol y, si quieres, el puesto (solo informativo). Le llega un correo con un enlace para crear su contraseña. Si no le llegó, en el menú **…** de su fila está **Reenviar invitación**.\n- **Cambiar rol:** con el selector de su fila (Vendedor, Repartidor o Administrador).\n- **Cambiar puesto:** en el menú **…** de su fila.\n- **Desactivar / Reactivar:** en el menú **…**. Al desactivar se cierra su sesión en todos sus dispositivos y ya no puede entrar; sus mensajes, notas e historial se conservan. Nunca se borran usuarios.\n- No puedes desactivarte ni quitarte el rol a ti mismo, y el sistema nunca se queda sin al menos un administrador activo.\n\n## Mi perfil\nEn el menú de tu usuario (abajo en la barra lateral) → **Mi perfil**: cambia tu nombre, el color o el emoji de tu avatar y tu contraseña (mínimo 8 caracteres, con al menos una letra y un número). El rol y el puesto los cambia un administrador.\n\n## Olvidé mi contraseña\nEn la pantalla de inicio de sesión, pulsa **¿La olvidaste?**, escribe tu correo y abre el enlace que te llega. Ahí escribes y confirmas tu contraseña nueva. Si el enlace venció, pide uno nuevo. Una cuenta desactivada no puede entrar aunque cambie la contraseña."
   }
 ];

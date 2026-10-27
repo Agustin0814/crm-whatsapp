@@ -162,7 +162,12 @@ export function Composer({ conversationId, contact, windowOpen, remainingMs, has
     });
   }
 
+  // Respuestas rápidas usadas en el borrador: el servidor comprueba que el rol
+  // de quien escribe pueda usarlas (quick_replies.visible_para, por RLS).
+  const usedRepliesRef = useRef(new Set<string>());
+
   function insertReply(reply: QuickReply, fromSlash: boolean) {
+    usedRepliesRef.current.add(reply.id);
     insertAt(applyTemplate(reply.body, contact), fromSlash && slash ? slash.start : undefined);
   }
 
@@ -219,7 +224,7 @@ export function Composer({ conversationId, contact, windowOpen, remainingMs, has
       const response = await fetch("/api/whatsapp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId, text: body }),
+        body: JSON.stringify({ conversationId, text: body, quickReplyIds: [...usedRepliesRef.current] }),
       });
       const data = (await response.json().catch(() => ({}))) as { message?: Message; error?: string };
       if (!response.ok || !data.message) {
@@ -227,6 +232,7 @@ export function Composer({ conversationId, contact, windowOpen, remainingMs, has
         return;
       }
       setText("");
+      usedRepliesRef.current.clear();
       onSent(data.message);
     } catch {
       toast.error("Error de red al enviar el mensaje");

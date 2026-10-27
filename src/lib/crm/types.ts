@@ -8,18 +8,11 @@ export type Message = Tables<"messages">;
 export type Note = Tables<"notes">;
 export type QuickReply = Tables<"quick_replies">;
 
-export type Role = "superadmin" | "admin" | "agent";
+export type ConversationEvent = Tables<"conversation_events">;
+export type AppNotification = Tables<"notifications">;
 
-export const ROLE_LABELS: Record<Role, string> = {
-  superadmin: "Proveedor",
-  admin: "Administrador",
-  agent: "Agente",
-};
-
-/** admin y superadmin pueden todo lo que es «solo admin». */
-export function isAdminRole(role: string | null | undefined): boolean {
-  return role === "admin" || role === "superadmin";
-}
+// Roles y permisos: viven en src/lib/permissions.ts (compartido cliente/servidor).
+export { ROLE_LABELS, isAdminRole, type Role } from "@/lib/permissions";
 
 /** Contacto con sus etiquetas ya aplanadas. */
 export type ContactWithTags = Contact & { tags: Tag[] };
@@ -45,6 +38,33 @@ export const STATUS_LABELS: Record<ConversationStatus, string> = {
 export function isConversationStatus(value: string): value is ConversationStatus {
   return (CONVERSATION_STATUSES as readonly string[]).includes(value);
 }
+
+// --- Etapas del chat (independientes del estado y de la asignación) ---------
+
+export const STAGES = ["sin_asignar", "ventas", "reparto"] as const;
+export type Stage = (typeof STAGES)[number];
+
+export const STAGE_LABELS: Record<Stage, string> = {
+  sin_asignar: "Sin asignar",
+  ventas: "Ventas",
+  reparto: "Reparto",
+};
+
+export function isStage(value: string | null | undefined): value is Stage {
+  return (STAGES as readonly string[]).includes(value ?? "");
+}
+
+/** Acciones de etapa (public.change_conversation_stage). */
+export type StageAction = "take" | "to_delivery" | "delivered" | "back_to_sales";
+
+/** Texto de la línea de sistema del chat: «Pasó a Reparto por Ana». */
+export const EVENT_LABELS: Record<string, string> = {
+  a_ventas: "Pasó a Ventas",
+  a_reparto: "Pasó a Reparto",
+  entregado: "Entregado",
+  devuelto_ventas: "Devuelto a Ventas",
+  reasignado: "Reasignado",
+};
 
 // --- Clasificación (contactos y empresas) ------------------------------------
 

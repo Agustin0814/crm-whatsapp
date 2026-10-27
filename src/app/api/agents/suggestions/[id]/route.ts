@@ -2,8 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { PART_PAUSE_MS, sleep } from "@/lib/agents/engine";
 import { MAX_ACTIONS_PER_RUN } from "@/lib/agents/prompt";
 import { AgentSendError, MAX_AGENT_TEXT, sendAgentText } from "@/lib/agents/send";
+import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import { WhatsAppApiError } from "@/lib/whatsapp/send";
 
 type Body = { action?: unknown; text?: unknown; texts?: unknown[] };
@@ -19,14 +19,11 @@ const MAX_PARTS = MAX_ACTIONS_PER_RUN;
  */
 export async function POST(request: NextRequest, ctx: RouteContext<"/api/agents/suggestions/[id]">) {
   const { id } = await ctx.params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
-
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (!profile) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
+  // Vendedor o administración ACTIVOS: después se usa la service role, así que
+  // el rol se valida aquí (el repartidor no ve ni aprueba sugerencias).
+  const check = await requireRole(["vendedor", "admin", "superadmin"]);
+  if (!check.ok) return NextResponse.json({ error: check.error }, { status: check.status });
+  const user = { id: check.userId };
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const action = body.action === "send" || body.action === "discard" ? body.action : null;

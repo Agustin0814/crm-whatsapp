@@ -27,7 +27,7 @@ const NOTE_SELECT = "*, author:profiles(id, full_name)" as const;
  */
 export function NotesPanel({ conversationId, contactId }: { conversationId: string; contactId: string }) {
   const supabase = createClient();
-  const { me, isAdmin } = useCrm();
+  const { me, isAdmin, isSellerOrAdmin } = useCrm();
   const agentName = useAgentNames();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -161,7 +161,7 @@ export function NotesPanel({ conversationId, contactId }: { conversationId: stri
           {notes.map((note) => {
             const byAgent = note.agent_id !== null || note.agent_label !== null;
             const mine = !byAgent && note.author_id === me?.id;
-            const canDelete = byAgent || mine || isAdmin;
+            const canDelete = (byAgent && isSellerOrAdmin) || mine || isAdmin;
             const editing = editingId === note.id;
             return (
               <article key={note.id} className="group rounded-lg border border-nota-borde bg-nota p-3 text-nota-texto">

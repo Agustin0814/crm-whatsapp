@@ -22,6 +22,6 @@ El **Asistente de respuestas** contesta a los clientes en WhatsApp.
 ## En el chat
 - En modo Sugerencia aparece «Sugerencia del asistente» sobre el cuadro de escritura, con **Enviar**, **Editar** y **Descartar**.
 - El interruptor del encabezado del chat pausa o reanuda el asistente en ese chat.
-- El asistente se pausa solo cuando una persona responde, cuando se asigna el chat o cuando llega al límite de respuestas seguidas.
-- Si el cliente pide una persona, o el asistente no sabe la respuesta, **pasa el chat a una persona** y se pausa.
+- El asistente se pausa solo cuando una persona responde, cuando se asigna el chat, cuando llega al límite de respuestas seguidas o cuando el chat pasa a **Reparto** («En reparto»). Al **Marcar entregado** se reanuda; si el chat se **Devuelve a Ventas**, sigue pausado.
+- Si el cliente pide una persona, o el asistente no sabe la respuesta, **pasa el chat a una persona**, se pausa y el chat entra a la etapa **Ventas** (los vendedores reciben un aviso).
 - Solo responde dentro de la ventana de 24 horas.

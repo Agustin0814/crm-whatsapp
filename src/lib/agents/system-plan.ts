@@ -4,12 +4,14 @@
 
 import type { ToolDefinition } from "./provider";
 
-export type AssistantRole = "agent" | "admin" | "superadmin";
+// El repartidor no usa el asistente: no es un AssistantRole (la base lo excluye
+// con private.require_staff). Misma escala que private.role_rank.
+export type AssistantRole = "vendedor" | "admin" | "superadmin";
 
-export const ROLE_RANK: Record<AssistantRole, number> = { agent: 1, admin: 2, superadmin: 3 };
+export const ROLE_RANK: Record<AssistantRole, number> = { vendedor: 1, admin: 2, superadmin: 3 };
 
 export function isAssistantRole(value: unknown): value is AssistantRole {
-  return value === "agent" || value === "admin" || value === "superadmin";
+  return value === "vendedor" || value === "admin" || value === "superadmin";
 }
 
 export function maxRole(a: AssistantRole, b: AssistantRole): AssistantRole {
@@ -44,18 +46,18 @@ export function isSystemToolName(value: string): value is SystemToolName {
 
 /** Piso de rol de cada herramienta: el proveedor puede subirlo, nunca bajarlo. */
 export const TOOL_FLOOR: Record<SystemToolName, AssistantRole> = {
-  buscar_ayuda: "agent",
-  estado_agentes: "agent",
-  conteo_mensajes: "agent",
-  conteo_contactos: "agent",
-  respuestas_rapidas: "agent",
-  buscar_contactos: "agent",
-  leer_conversacion: "agent",
-  resumir_conversacion: "agent",
-  info_negocio: "agent",
+  buscar_ayuda: "vendedor",
+  estado_agentes: "vendedor",
+  conteo_mensajes: "vendedor",
+  conteo_contactos: "vendedor",
+  respuestas_rapidas: "vendedor",
+  buscar_contactos: "vendedor",
+  leer_conversacion: "vendedor",
+  resumir_conversacion: "vendedor",
+  info_negocio: "vendedor",
   actividad_agentes: "admin",
   consumo_agentes: "admin",
-  proponer_tarea: "agent",
+  proponer_tarea: "vendedor",
 };
 
 /** Etiquetas para el panel del proveedor. */
@@ -121,7 +123,7 @@ export type StoredTurn = {
 
 /** Rol mínimo para ver un turno: el mayor que exigió alguna herramienta usada. */
 export function turnMinRole(turn: Pick<StoredTurn, "results">): AssistantRole {
-  return turn.results.reduce<AssistantRole>((acc, r) => maxRole(acc, r.minRole), "agent");
+  return turn.results.reduce<AssistantRole>((acc, r) => maxRole(acc, r.minRole), "vendedor");
 }
 
 /** JSON recortado para el modelo (nunca más de `maxChars`). */
@@ -324,7 +326,8 @@ export function rowsToTurns(rows: AssistantMessageRow[]): StoredTurn[] {
         id: data.id,
         tool: row.tool_name,
         fetchedAt: row.fetched_at ?? row.created_at,
-        minRole: isAssistantRole(data.min_role) ? data.min_role : "agent",
+        // "agent" = nombre anterior de «vendedor» (turnos guardados antes del cambio de roles).
+        minRole: isAssistantRole(data.min_role) ? data.min_role : "vendedor",
         data: data.data ?? null,
         named: Array.isArray(data.named) ? data.named.filter((n): n is string => typeof n === "string") : [],
       });

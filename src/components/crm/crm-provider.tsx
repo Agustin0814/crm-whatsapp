@@ -4,18 +4,27 @@ import { useRouter } from "next/navigation";
 import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { ContactRole } from "@/lib/crm/companies";
-import { isAdminRole, type Profile, type Tag } from "@/lib/crm/types";
+import type { Profile, Tag } from "@/lib/crm/types";
+import { isAdminRole, isDeliveryRole, isRole, isSellerOrAdmin, type Role } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/client";
 
 type CrmContextValue = {
   /** Perfil del usuario con sesión (null mientras carga). */
   me: Profile | null;
+  /** Rol del usuario con sesión (null mientras carga). */
+  role: Role | null;
   isAdmin: boolean;
+  /** Vendedor o administración: ven todos los chats y contactos. */
+  isSellerOrAdmin: boolean;
+  /** Repartidor: solo ve sus chats en reparto. */
+  isDelivery: boolean;
   /** Proveedor: el único que ve y edita la capa bloqueada de los agentes. */
   isSuperadmin: boolean;
   loading: boolean;
-  /** Todos los usuarios (para asignar conversaciones). */
+  /** Todos los usuarios visibles (para nombres de autores). */
   profiles: Profile[];
+  /** Usuarios activos (para asignar conversaciones y elegir repartidor). */
+  activeProfiles: Profile[];
   tags: Tag[];
   /** Catálogo de funciones (Compras, Pagos…) para los vínculos persona–empresa. */
   roles: ContactRole[];
@@ -80,14 +89,27 @@ export function CrmProvider({ children }: { children: ReactNode }) {
     };
   }, [supabase, router, reloadProfiles, reloadTags, reloadRoles]);
 
+  // Cuenta desactivada con la página abierta: se cierra la sesión (la base ya
+  // le niega todo por RLS; esto solo lo saca de la pantalla).
+  const meInactive = profiles.some((p) => p.id === userId && !p.is_active);
+  useEffect(() => {
+    if (!meInactive) return;
+    void supabase.auth.signOut().then(() => router.replace("/login?motivo=inactivo"));
+  }, [meInactive, supabase, router]);
+
   const value = useMemo<CrmContextValue>(() => {
     const me = profiles.find((p) => p.id === userId) ?? null;
+    const role = isRole(me?.role) ? me.role : null;
     return {
       me,
-      isAdmin: isAdminRole(me?.role),
+      role,
+      isAdmin: isAdminRole(role),
+      isSellerOrAdmin: isSellerOrAdmin(role),
+      isDelivery: isDeliveryRole(role),
       isSuperadmin: me?.role === "superadmin",
       loading,
       profiles,
+      activeProfiles: profiles.filter((p) => p.is_active),
       tags,
       roles,
       reloadProfiles,

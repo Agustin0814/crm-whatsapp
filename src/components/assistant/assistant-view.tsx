@@ -175,7 +175,7 @@ export function AssistantView() {
                   >
                     <span className="flex items-center gap-1.5 text-sm font-medium">
                       <span className="truncate">{c.title}</span>
-                      {c.min_role !== "agent" && <LockIcon className="size-3.5 shrink-0 text-texto-suave" aria-label="Solo administradores" />}
+                      {c.min_role !== "vendedor" && <LockIcon className="size-3.5 shrink-0 text-texto-suave" aria-label="Solo administradores" />}
                     </span>
                     <span className="text-xs text-texto-suave">{formatRelative(c.updated_at, listedAt)}</span>
                   </Link>

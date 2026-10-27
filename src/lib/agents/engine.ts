@@ -739,6 +739,9 @@ async function handoff(
       ...(locked.handoff_assign_to ? { assigned_to: locked.handoff_assign_to } : {}),
     })
     .eq("id", ctx.conversation.id);
+  // Etapa: el chat pasa a Ventas (evento «a_ventas» y aviso a los vendedores en la base).
+  const { error: stageError } = await supabase.rpc("agent_handoff_to_sales", { p_conversation_id: ctx.conversation.id });
+  if (stageError) console.error("[agents] No se pudo pasar el chat a ventas en el traspaso");
 
   if (config.alerts.on_handoff) {
     const name = ctx.contact.name?.trim() || "un contacto";

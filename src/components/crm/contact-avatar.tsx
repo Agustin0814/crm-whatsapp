@@ -17,6 +17,10 @@ type Props = {
   company?: string | null;
   size?: keyof typeof SIZES;
   className?: string;
+  /** Color elegido por el usuario (1..8); si falta, se deriva de la semilla. */
+  colorIndex?: number | null;
+  /** Emoji elegido por el usuario (tiene prioridad sobre el nombre). */
+  emoji?: string | null;
 };
 
 /**
@@ -24,8 +28,8 @@ type Props = {
  * con contraste AA para el blanco). El contenido lo decide avatarFor():
  * emoji, icono de empresa, iniciales o icono de persona.
  */
-export function ContactAvatar({ seed, name, company, size = "md", className }: Props) {
-  const spec = avatarFor({ name, company });
+export function ContactAvatar({ seed, name, company, size = "md", className, colorIndex, emoji }: Props) {
+  const spec = emoji?.trim() ? ({ kind: "emoji", emoji: emoji.trim() } as const) : avatarFor({ name, company });
   const s = SIZES[size];
 
   if (spec.kind === "emoji") {
@@ -43,10 +47,26 @@ export function ContactAvatar({ seed, name, company, size = "md", className }: P
   return (
     <span
       className={cn("inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white select-none", s.box, s.text, className)}
-      style={{ backgroundColor: `var(--avatar-${avatarColorIndex(seed)})` }}
+      style={{ backgroundColor: `var(--avatar-${colorIndex && colorIndex >= 1 && colorIndex <= 8 ? colorIndex : avatarColorIndex(seed)})` }}
       aria-hidden
     >
       {spec.kind === "initials" ? spec.text : <Icon name={spec.icon} className={s.icon} />}
     </span>
+  );
+}
+
+type UserLike = { id: string; full_name: string | null; avatar_color?: number | null; avatar_emoji?: string | null };
+
+/** Avatar de un usuario del CRM con su color o emoji elegido en «Mi perfil». */
+export function UserAvatar({ user, size = "sm", className }: { user: UserLike | null | undefined; size?: keyof typeof SIZES; className?: string }) {
+  return (
+    <ContactAvatar
+      seed={user?.id ?? "yo"}
+      name={user?.full_name}
+      colorIndex={user?.avatar_color}
+      emoji={user?.avatar_emoji}
+      size={size}
+      className={className}
+    />
   );
 }

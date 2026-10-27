@@ -1,30 +1,23 @@
 "use client";
 
-import { BellIcon, LogOutIcon, MonitorIcon, MoonIcon, SunIcon, Volume2Icon } from "lucide-react";
+import { BellIcon, MonitorIcon, MoonIcon, SunIcon, Volume2Icon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
-import { toast } from "sonner";
-import { EditableField } from "@/components/contacts/editable-field";
-import { ContactAvatar } from "@/components/crm/contact-avatar";
-import { profileName, useCrm } from "@/components/crm/crm-provider";
+import type { ReactNode } from "react";
+import { useCrm } from "@/components/crm/crm-provider";
 import { useNotifications } from "@/components/crm/notifications-provider";
 import { PageHeader } from "@/components/crm/page-header";
 import { QuickRepliesView } from "@/components/quick-replies/quick-replies-view";
 import { TagsView } from "@/components/tags/tags-view";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { errorMessage } from "@/lib/crm/contacts";
-import { ROLE_LABELS, type Role } from "@/lib/crm/types";
-import { createClient } from "@/lib/supabase/client";
 import { RolesSettings } from "./roles-settings";
 import { SalesSettings } from "./sales-settings";
 import { SectionHeader } from "./section-header";
+import { ProfileSection } from "./profile-section";
 import { UsersAdmin } from "./users-admin";
 
 export const SETTINGS_TABS = [
@@ -32,10 +25,10 @@ export const SETTINGS_TABS = [
   { value: "usuarios", label: "Usuarios", adminOnly: true },
   { value: "notificaciones", label: "Notificaciones", adminOnly: false },
   { value: "apariencia", label: "Apariencia", adminOnly: false },
-  { value: "etiquetas", label: "Etiquetas", adminOnly: false },
-  { value: "respuestas-rapidas", label: "Respuestas rápidas", adminOnly: false },
-  { value: "funciones", label: "Funciones", adminOnly: false },
-  { value: "contactos-ventas", label: "Contactos y ventas", adminOnly: false },
+  { value: "etiquetas", label: "Etiquetas", adminOnly: true },
+  { value: "respuestas-rapidas", label: "Respuestas rápidas", adminOnly: true },
+  { value: "funciones", label: "Funciones", adminOnly: true },
+  { value: "contactos-ventas", label: "Contactos y ventas", adminOnly: true },
 ] as const;
 
 type TabValue = (typeof SETTINGS_TABS)[number]["value"];
@@ -69,7 +62,10 @@ export function SettingsView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title="Configuración" description="Tu perfil, el equipo, las notificaciones y los catálogos del CRM." />
+      <PageHeader
+        title={isAdmin || loading ? "Configuración" : "Mi perfil"}
+        description={isAdmin || loading ? "Tu perfil, el equipo, las notificaciones y los catálogos del CRM." : "Tu nombre, tu avatar, tu contraseña y tus avisos."}
+      />
 
       <Tabs value={tab} onValueChange={changeTab} className="flex min-h-0 flex-1 flex-col gap-0">
         <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b px-4 md:px-6">
@@ -89,98 +85,42 @@ export function SettingsView() {
             <TabsContent value="perfil">
               <ProfileSection />
             </TabsContent>
-            {isAdmin && (
-              <TabsContent value="usuarios">
-                <section className="space-y-4">
-                  <SectionHeader
-                    title="Usuarios y roles"
-                    description="Los agentes usan la bandeja; los administradores además gestionan usuarios, eliminan etiquetas y administran las respuestas rápidas."
-                  />
-                  <UsersAdmin />
-                </section>
-              </TabsContent>
-            )}
             <TabsContent value="notificaciones">
               <NotificationsSection />
             </TabsContent>
             <TabsContent value="apariencia">
               <AppearanceSection />
             </TabsContent>
-            <TabsContent value="etiquetas">
-              <TagsView />
-            </TabsContent>
-            <TabsContent value="respuestas-rapidas">
-              <QuickRepliesView />
-            </TabsContent>
-            <TabsContent value="funciones">
-              <RolesSettings />
-            </TabsContent>
-            <TabsContent value="contactos-ventas">
-              <SalesSettings />
-            </TabsContent>
+            {/* Pestañas de administración: ni se montan para otros roles. */}
+            {isAdmin && (
+              <>
+                <TabsContent value="usuarios">
+                  <section className="space-y-4">
+                    <SectionHeader
+                      title="Usuarios y roles"
+                      description="Vendedores: todos los chats y contactos. Repartidores: solo los chats en reparto. Administradores: además usuarios, agentes, estadísticas y configuración."
+                    />
+                    <UsersAdmin />
+                  </section>
+                </TabsContent>
+                <TabsContent value="etiquetas">
+                  <TagsView />
+                </TabsContent>
+                <TabsContent value="respuestas-rapidas">
+                  <QuickRepliesView />
+                </TabsContent>
+                <TabsContent value="funciones">
+                  <RolesSettings />
+                </TabsContent>
+                <TabsContent value="contactos-ventas">
+                  <SalesSettings />
+                </TabsContent>
+              </>
+            )}
           </div>
         </div>
       </Tabs>
     </div>
-  );
-}
-
-// --- Perfil ---------------------------------------------------------------------
-
-function ProfileSection() {
-  const supabase = createClient();
-  const { me, isAdmin, loading, reloadProfiles } = useCrm();
-  const [email, setEmail] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    supabase.auth.getUser().then(({ data }) => {
-      if (!cancelled) setEmail(data.user?.email ?? null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase]);
-
-  async function saveName(fullName: string | null) {
-    if (!me) return;
-    const { error } = await supabase.from("profiles").update({ full_name: fullName }).eq("id", me.id);
-    if (error) {
-      toast.error(errorMessage(error, "No se pudo guardar el nombre"));
-      throw error;
-    }
-    toast.success("Nombre actualizado");
-    await reloadProfiles();
-  }
-
-  return (
-    <section className="space-y-6">
-      <SectionHeader title="Perfil" description="Así te verá tu equipo al asignar conversaciones y en las notas internas." />
-      {loading || !me ? (
-        <Skeleton className="h-28 w-full rounded-xl" />
-      ) : (
-        <div className="flex flex-col gap-6 rounded-xl border p-5 sm:flex-row sm:items-start">
-          <ContactAvatar seed={me.id} name={me.full_name} size="xl" />
-          <div className="min-w-0 flex-1 space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-lg font-semibold">{profileName(me)}</p>
-              <Badge variant={isAdmin ? "default" : "secondary"}>{ROLE_LABELS[me.role as Role] ?? me.role}</Badge>
-            </div>
-            <EditableField icon="persona" label="Nombre" value={me.full_name} placeholder="Tu nombre" onSave={saveName} />
-            <div className="flex items-start gap-3">
-              <Icon name="correo" className="mt-1 size-5 text-texto-suave" />
-              <div>
-                <p className="text-xs font-medium text-texto-suave">Correo</p>
-                <p className="text-sm">{email ?? " "}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      <Button variant="outline" onClick={() => void createClient().auth.signOut()}>
-        <LogOutIcon aria-hidden /> Cerrar sesión
-      </Button>
-    </section>
   );
 }
 

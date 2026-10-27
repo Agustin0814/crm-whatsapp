@@ -13,6 +13,7 @@ import { isWindowOpen, windowRemainingMs } from "@/lib/conversation-window";
 import {
   CONVERSATION_STATUSES,
   STATUS_LABELS,
+  type ConversationEvent,
   type ConversationItem,
   type ConversationStatus,
   type Message,
@@ -27,10 +28,14 @@ import { CompanyMatchBanner } from "./company-match-banner";
 import { SuggestionBanner } from "./suggestion-banner";
 import { AgentPauseToggle } from "./agent-pause-toggle";
 import { AgentSuggestionBanner } from "./agent-suggestion-banner";
+import { StageBar, type StageActionInput } from "./stage-bar";
 
 type Props = ConversationActionsHandlers & {
   conversation: ConversationItem;
   messages: Message[];
+  /** Historial de etapas (líneas de sistema entre los mensajes). */
+  events: ConversationEvent[];
+  onStageAction: (input: StageActionInput) => Promise<boolean>;
   loadingMessages: boolean;
   now: number | null;
   detailsOpen: boolean;
@@ -49,6 +54,8 @@ type Props = ConversationActionsHandlers & {
 export function ChatView({
   conversation,
   messages,
+  events,
+  onStageAction,
   loadingMessages,
   now,
   detailsOpen,
@@ -58,7 +65,7 @@ export function ChatView({
   onReloadContact,
   ...handlers
 }: Props) {
-  const { profiles } = useCrm();
+  const { activeProfiles, isDelivery } = useCrm();
   const [showNotes, setShowNotes] = useState(false);
   const composerRef = useRef<ComposerHandle>(null);
   // Contador de dragenter/dragleave: los hijos disparan eventos propios.
@@ -112,7 +119,12 @@ export function ChatView({
           className="flex min-w-0 items-center gap-3 rounded-xl p-1 pr-2 text-left hover:bg-superficie-2"
           aria-label={`Ver ficha de ${title}`}
         >
-          <ContactAvatar seed={contact?.wa_id ?? conversation.id} name={contact?.name} company={contact?.company} size="md" />
+          <ContactAvatar
+            seed={contact?.wa_id ?? conversation.id}
+            name={contact?.name}
+            company={contact?.company}
+            size="md"
+          />
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 truncate text-lg leading-tight font-semibold">
               <span className="truncate">{title}</span>
@@ -126,48 +138,55 @@ export function ChatView({
                 {tags.length > 3 && <span className="text-xs text-texto-suave">+{tags.length - 3}</span>}
               </div>
             ) : (
-              contact && <p className="truncate text-xs text-texto-suave">{formatPhone(contact.wa_id ?? contact.phone)}</p>
+              contact && (
+                <p className="truncate text-xs text-texto-suave">{formatPhone(contact.wa_id ?? contact.phone)}</p>
+              )
             )}
           </div>
         </button>
 
         <div className="ml-auto flex items-center gap-1.5">
-          {/* Selectores visibles en pantallas anchas; en el resto están en el menú «más» */}
-          <Select
-            value={conversation.status}
-            onValueChange={(v) => handlers.onUpdate({ status: v as ConversationStatus })}
-          >
-            <SelectTrigger className="hidden h-10 w-36 rounded-lg xl:flex" aria-label="Estado de la conversación">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" align="end">
-              {CONVERSATION_STATUSES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  <StatusDot status={s} /> {STATUS_LABELS[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Selectores visibles en pantallas anchas; en el resto están en el menú «más».
+              El repartidor no cambia estado, asignación ni pausa (la base tampoco lo deja). */}
+          {!isDelivery && (
+            <Select
+              value={conversation.status}
+              onValueChange={(v) => handlers.onUpdate({ status: v as ConversationStatus })}
+            >
+              <SelectTrigger className="hidden h-10 w-36 rounded-lg xl:flex" aria-label="Estado de la conversación">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" align="end">
+                {CONVERSATION_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    <StatusDot status={s} /> {STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
-          <Select
-            value={conversation.assigned_to ?? UNASSIGNED}
-            onValueChange={(v) => handlers.onUpdate({ assigned_to: v === UNASSIGNED ? null : v })}
-          >
-            <SelectTrigger className="hidden h-10 w-44 rounded-lg xl:flex" aria-label="Agente asignado">
-              <Icon name="asignar" className="size-4 text-texto-suave" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" align="end">
-              <SelectItem value={UNASSIGNED}>Sin asignar</SelectItem>
-              {profiles.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {profileName(p)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {!isDelivery && (
+            <Select
+              value={conversation.assigned_to ?? UNASSIGNED}
+              onValueChange={(v) => handlers.onUpdate({ assigned_to: v === UNASSIGNED ? null : v })}
+            >
+              <SelectTrigger className="hidden h-10 w-44 rounded-lg xl:flex" aria-label="Persona asignada">
+                <Icon name="asignar" className="size-4 text-texto-suave" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" align="end">
+                <SelectItem value={UNASSIGNED}>Sin asignar</SelectItem>
+                {activeProfiles.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {profileName(p)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
-          <AgentPauseToggle conversation={conversation} />
+          {!isDelivery && <AgentPauseToggle conversation={conversation} />}
 
           <IconButton
             label={showNotes ? "Volver a los mensajes" : "Notas internas"}
@@ -178,7 +197,9 @@ export function ChatView({
             <Icon name="notas" className="size-5" />
           </IconButton>
 
-          <ConversationActionsMenu conversation={conversation} {...handlers} triggerClassName="text-texto-suave" />
+          {!isDelivery && (
+            <ConversationActionsMenu conversation={conversation} {...handlers} triggerClassName="text-texto-suave" />
+          )}
 
           <IconButton
             label={detailsOpen ? "Cerrar ficha del contacto" : "Abrir ficha del contacto"}
@@ -195,7 +216,9 @@ export function ChatView({
         </div>
       </header>
 
-      {contact && (
+      <StageBar conversation={conversation} windowOpen={windowOpen} onAction={onStageAction} />
+
+      {contact && !isDelivery && (
         <SuggestionBanner
           contactId={contact.id}
           classification={contact.classification}
@@ -203,7 +226,7 @@ export function ChatView({
           onResolved={onReloadContact}
         />
       )}
-      {contact && (
+      {contact && !isDelivery && (
         <CompanyMatchBanner contactId={contact.id} phoneKey={`${contact.wa_id ?? ""}|${contact.phone ?? ""}`} />
       )}
 
@@ -222,7 +245,7 @@ export function ChatView({
             </p>
           </div>
         )}
-        <MessageList messages={messages} contact={contact} loading={loadingMessages} now={now} />
+        <MessageList messages={messages} events={events} contact={contact} loading={loadingMessages} now={now} />
         {/* data-assistant-avoid: la burbuja del Asistente del sistema se coloca por encima. */}
         <div data-assistant-avoid className="shrink-0">
           <AgentSuggestionBanner conversationId={conversation.id} windowOpen={windowOpen} />
@@ -240,7 +263,6 @@ export function ChatView({
       <div className={cn("min-h-0 flex-1 flex-col", showNotes ? "flex" : "hidden")}>
         <NotesPanel conversationId={conversation.id} contactId={conversation.contact_id} />
       </div>
-
     </div>
   );
 }

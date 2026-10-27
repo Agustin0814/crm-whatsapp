@@ -25,7 +25,7 @@ import { isQuickReplyPermission, QUICK_REPLY_PERMISSION_LABELS } from "@/lib/age
 import { errorMessage } from "@/lib/crm/contacts";
 import type { QuickReply } from "@/lib/crm/types";
 import { createClient } from "@/lib/supabase/client";
-import { QuickReplyDialog, type QuickReplyValues } from "./quick-reply-dialog";
+import { AUDIENCE_LABELS, isQuickReplyAudience, QuickReplyDialog, type QuickReplyValues } from "./quick-reply-dialog";
 
 export function QuickRepliesView() {
   const supabase = createClient();
@@ -162,7 +162,10 @@ export function QuickRepliesView() {
                         <BotIcon aria-hidden /> Asistente: {QUICK_REPLY_PERMISSION_LABELS[reply.agent_permission].toLowerCase()}
                       </Badge>
                     )}
-                    {author && <p className="text-xs text-muted-foreground">Creada por {profileName(author)}</p>}
+                    <p className="text-xs text-muted-foreground">
+                      Visible para: {isQuickReplyAudience(reply.visible_para) ? AUDIENCE_LABELS[reply.visible_para].toLowerCase() : reply.visible_para}
+                      {author && <> · Creada por {profileName(author)}</>}
+                    </p>
                   </CardContent>
                 </Card>
               );

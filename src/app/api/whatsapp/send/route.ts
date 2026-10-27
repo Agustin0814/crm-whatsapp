@@ -6,7 +6,9 @@ import { sendTextMessage, WhatsAppApiError } from "@/lib/whatsapp/send";
 /** Límite de caracteres de un mensaje de texto en WhatsApp. */
 const MAX_TEXT_LENGTH = 4096;
 
-type SendBody = { conversationId?: unknown; text?: unknown };
+type SendBody = { conversationId?: unknown; text?: unknown; quickReplyIds?: unknown };
+
+const UUID_RE = /^[0-9a-f-]{36}$/i;
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -36,6 +38,19 @@ export async function POST(request: NextRequest) {
       { error: `El mensaje supera ${MAX_TEXT_LENGTH} caracteres` },
       { status: 400 },
     );
+  }
+
+  // 2b. Respuestas rápidas usadas: deben ser visibles para el rol de quien
+  // escribe (RLS de quick_replies según visible_para).
+  const quickReplyIds = Array.isArray(body.quickReplyIds)
+    ? [...new Set(body.quickReplyIds.filter((id): id is string => typeof id === "string" && UUID_RE.test(id)))].slice(0, 20)
+    : [];
+  if (quickReplyIds.length > 0) {
+    const { data: visible, error: qrError } = await supabase.from("quick_replies").select("id").in("id", quickReplyIds);
+    if (qrError) return NextResponse.json({ error: "No se pudieron validar las respuestas rápidas" }, { status: 500 });
+    if ((visible?.length ?? 0) !== quickReplyIds.length) {
+      return NextResponse.json({ error: "Una de las respuestas rápidas no está disponible para tu rol" }, { status: 403 });
+    }
   }
 
   // 3. Conversación + número del contacto.

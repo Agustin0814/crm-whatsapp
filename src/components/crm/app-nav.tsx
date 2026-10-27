@@ -22,14 +22,14 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { BUSINESS_LABEL } from "@/lib/brand";
-import { ROLE_LABELS, type Role } from "@/lib/crm/types";
+import { ROLE_LABELS, canAccessPath, isRole } from "@/lib/permissions";
 import { writeSidebarCookie } from "@/lib/sidebar";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { AssistantBubble } from "@/components/assistant/assistant-bubble";
 import { useAssistant } from "@/components/assistant/assistant-provider";
 import { SidebarLogo } from "./brand-logo";
-import { ContactAvatar } from "./contact-avatar";
+import { UserAvatar } from "./contact-avatar";
 import { profileName, useCrm } from "./crm-provider";
 import { useNotifications, type RealtimeStatus } from "./notifications-provider";
 
@@ -165,10 +165,24 @@ function activeIndex(pathname: string, items: NavItem[]): number {
   return items.findIndex((item) => isActive(pathname, item.href));
 }
 
-/** Opciones visibles: «Asistente» solo si el agente está activo, el rol puede usarlo y hay chats guardados. */
+/** Para quien no administra, «Configuración» se reduce a su perfil, avisos y tema. */
+const PROFILE_ITEM: NavItem = { href: "/configuracion", label: "Mi perfil", icon: "persona" };
+
+/**
+ * Opciones visibles según el rol (canAccessPath, la misma regla que aplica el
+ * proxy): «Asistente» además solo si el agente está activo, el rol puede
+ * usarlo y hay chats guardados.
+ */
 function useNavItems(): NavItem[] {
   const { availability } = useAssistant();
-  return useMemo(() => NAV_ITEMS.filter((item) => item.href !== "/asistente" || availability.savedChats), [availability.savedChats]);
+  const { role, isAdmin, loading } = useCrm();
+  return useMemo(() => {
+    // Mientras carga el perfil solo se muestra la Bandeja (nunca opciones de más).
+    if (loading || !role) return NAV_ITEMS.slice(0, 1);
+    return NAV_ITEMS.filter((item) => canAccessPath(role, item.href))
+      .filter((item) => item.href !== "/asistente" || availability.savedChats)
+      .map((item) => (item.href === "/configuracion" && !isAdmin ? PROFILE_ITEM : item));
+  }, [availability.savedChats, role, isAdmin, loading]);
 }
 
 // --- Barra lateral -----------------------------------------------------------
@@ -449,12 +463,12 @@ function UserMenu({ expanded }: { expanded: boolean }) {
             >
               <span className={cn(CAPA_FILA, "group-hover/fila:bg-lateral-pie")} aria-hidden />
               <span className={COLUMNA_ICONO}>
-                <ContactAvatar seed={me?.id ?? "yo"} name={me?.full_name} size="sm" />
+                <UserAvatar user={me} size="sm" />
               </span>
               <span className={cn(TEXTO_FILA, "relative block")}>
                 <span className="block truncate text-sm font-medium text-lateral-texto-fuerte">{name}</span>
                 {me && (
-                  <span className="block text-xs text-lateral-texto-suave">{ROLE_LABELS[me.role as Role] ?? me.role}</span>
+                  <span className="block text-xs text-lateral-texto-suave">{isRole(me.role) ? ROLE_LABELS[me.role] : me.role}</span>
                 )}
               </span>
             </button>

@@ -22,7 +22,8 @@ import { useAgentNames } from "./use-agent-names";
  */
 export function ContactSummaryCard({ contactId }: { contactId: string }) {
   const supabase = createClient();
-  const { profiles } = useCrm();
+  // El repartidor solo lee el resumen (update_contact_summary exige vendedor o administración).
+  const { profiles, isSellerOrAdmin } = useCrm();
   const agentName = useAgentNames();
   const [row, setRow] = useState<ContactSummaryRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,7 +96,7 @@ export function ContactSummaryCard({ contactId }: { contactId: string }) {
       <header className="mb-1.5 flex items-center gap-2">
         <SparklesIcon className="size-3.5 text-marca-texto" aria-hidden />
         <h3 className="flex-1 text-xs font-semibold tracking-wide text-texto-suave uppercase">Resumen del cliente</h3>
-        {!editing && (
+        {!editing && isSellerOrAdmin && (
           <Button
             variant="ghost"
             size="icon-xs"

@@ -124,7 +124,7 @@ export function ConversationFilters({ filters, onChange }: Props) {
         </fieldset>
 
         <div className="space-y-2">
-          <Label className="text-xs text-texto-suave">Agente asignado</Label>
+          <Label className="text-xs text-texto-suave">Persona asignada</Label>
           <Select
             value={filters.assigneeId ?? ANY}
             onValueChange={(v) => onChange({ assigneeId: v === ANY ? null : v })}

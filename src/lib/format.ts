@@ -120,3 +120,11 @@ export function formatPhone(waId: string | null | undefined): string {
   if (mx) return `+52 ${mx[1]} ${mx[2]} ${mx[3]}`;
   return `+${digits}`;
 }
+
+/** Enlace tel: para llamar (México: +52 + 10 dígitos, sin el 1 de 521). */
+export function telHref(waId: string | null | undefined): string | null {
+  const digits = waId?.replace(/\D/g, "") ?? "";
+  if (!digits) return null;
+  const mx = /^(?:521?)?(\d{10})$/.exec(digits);
+  return mx ? `tel:+52${mx[1]}` : `tel:+${digits}`;
+}
