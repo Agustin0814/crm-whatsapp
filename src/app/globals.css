@@ -375,6 +375,16 @@
  * "backwards" aplica el primer fotograma solo mientras dura; al terminar no
  * queda ningún transform (un transform residual rompería los position: fixed).
  */
+@keyframes entrada-panel {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 @keyframes entrada-seccion {
   from {
     opacity: 0;
@@ -390,6 +400,12 @@
     animation: entrada-seccion 200ms ease-out backwards;
   }
 
+  /* Panel de la burbuja del Asistente del sistema: aparece desde su esquina. */
+  .entrada-panel {
+    animation: entrada-panel 180ms ease-out backwards;
+    transform-origin: bottom right;
+  }
+
   /* Filas que entran escalonadas (solo listas largas como Contactos): --i = índice. */
   .entrada-fila {
     animation: entrada-seccion 200ms ease-out backwards;
@@ -403,7 +419,8 @@
     display: none;
   }
   .entrada-seccion,
-  .entrada-fila {
+  .entrada-fila,
+  .entrada-panel {
     animation: none;
   }
 }

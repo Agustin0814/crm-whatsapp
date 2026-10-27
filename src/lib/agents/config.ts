@@ -4,10 +4,10 @@
 
 import type { Classification } from "@/lib/crm/types";
 
-export const AGENT_KEYS = { responder: "responder", notes: "notes" } as const;
+export const AGENT_KEYS = { responder: "responder", notes: "notes", system: "system" } as const;
 
 /** Tipo de agente (agents.kind): decide su motor, su panel y si tiene modo. */
-export type AgentKind = "responder" | "notes";
+export type AgentKind = "responder" | "notes" | "system";
 
 /**
  * Descripción corta de cada agente en la lista de /agentes, por `agents.key`.
@@ -16,6 +16,7 @@ export type AgentKind = "responder" | "notes";
 export const AGENT_DESCRIPTIONS: Record<string, string> = {
   responder: "Responde mensajes de WhatsApp en el chat y puede usar tus respuestas rápidas.",
   notes: "Deja notas internas y un resumen del cliente. Nunca escribe al cliente.",
+  system: "Ayuda a tu equipo a usar el CRM y a consultar datos. Nunca escribe a clientes ni cambia datos.",
 };
 export const DEFAULT_AGENT_DESCRIPTION = "Asistente de IA del chat.";
 
@@ -86,6 +87,8 @@ export type AgentLimits = {
   delay_seconds_max: number;
   monthly_token_cap: number;
   kill_switch: boolean;
+  /** Asistente del sistema: preguntas por persona al día (techo del proveedor). */
+  questions_per_person_max: number;
 };
 
 export const DEFAULT_LIMITS: AgentLimits = {
@@ -97,6 +100,7 @@ export const DEFAULT_LIMITS: AgentLimits = {
   delay_seconds_max: 600,
   monthly_token_cap: 0,
   kill_switch: false,
+  questions_per_person_max: 50,
 };
 
 /** Presets de espera del panel (segundos). */
@@ -216,6 +220,16 @@ export const PAUSE_REASON_LABELS: Record<string, string> = {
   limit_consecutive: "Límite de respuestas seguidas",
 };
 
+/**
+ * Motivo legible de la pausa. «assistant:<id>» = pausado desde el Asistente del
+ * sistema por esa persona (se guarda el id para no copiar nombres).
+ */
+export function pauseReasonLabel(reason: string | null, nameOf: (userId: string) => string): string | null {
+  if (!reason) return null;
+  if (reason.startsWith("assistant:")) return `Pausado desde el asistente por ${nameOf(reason.slice("assistant:".length))}`;
+  return PAUSE_REASON_LABELS[reason] ?? null;
+}
+
 export const OUTCOME_LABELS: Record<string, string> = {
   sent: "Enviado",
   suggested: "Sugerido",
@@ -224,4 +238,5 @@ export const OUTCOME_LABELS: Record<string, string> = {
   error: "Error",
   blocked_by_limit: "Bloqueado por límite",
   noted: "Anotado",
+  answered: "Respondido",
 };

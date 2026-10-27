@@ -39,8 +39,31 @@ export type GenerateReplyResult = {
   model: string;
 };
 
+/**
+ * Bucle de herramientas (Asistente del sistema): el modelo consulta herramientas
+ * de lectura y termina SIEMPRE llamando a `finalTool`. El servidor ejecuta cada
+ * consulta (`execute`) y le devuelve el resultado como texto.
+ */
+export type ToolLoopInput = GenerateReplyInput & {
+  /** Nombre de la función que cierra el turno (respuesta final). */
+  finalTool: string;
+  /** Consultas máximas antes de obligar a responder. */
+  maxToolCalls: number;
+  execute: (call: ToolCall) => Promise<string>;
+};
+
+export type ToolLoopResult = {
+  /** Argumentos de la llamada final (null si el modelo no la hizo). */
+  final: Record<string, unknown> | null;
+  /** Consultas ejecutadas (sin contar la final). */
+  toolCalls: number;
+  usage: { inputTokens: number; outputTokens: number };
+  model: string;
+};
+
 export interface ModelProvider {
   generateReply(input: GenerateReplyInput): Promise<GenerateReplyResult>;
+  runToolLoop(input: ToolLoopInput): Promise<ToolLoopResult>;
 }
 
 export class ModelProviderError extends Error {

@@ -1,6 +1,6 @@
 "use client";
 
-import { BellIcon, BotIcon, FlaskConicalIcon, NotebookPenIcon, Settings2Icon } from "lucide-react";
+import { BellIcon, BotIcon, FlaskConicalIcon, NotebookPenIcon, Settings2Icon, SparklesIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useCrm } from "@/components/crm/crm-provider";
@@ -41,6 +41,7 @@ import {
   AGENT_MODE_LABELS,
   DEFAULT_AGENT_DESCRIPTION,
   DEFAULT_LIMITS,
+  type AgentKind,
   type AgentLimits,
   type AgentMode,
 } from "@/lib/agents/config";
@@ -51,7 +52,9 @@ import { cn } from "@/lib/utils";
 import { ActivityLog } from "./activity-log";
 import { AgentConfigForm } from "./agent-config-form";
 import { LockedConfigForm } from "./locked-config-form";
+import { notifyAssistantChanged } from "@/components/assistant/assistant-provider";
 import { NotesConfigForm } from "./notes-config-form";
+import { SystemConfigForm } from "./system-config-form";
 
 const numberFmt = new Intl.NumberFormat("es-MX");
 const usdFmt = new Intl.NumberFormat("es-MX", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -65,6 +68,15 @@ function agentMode(agent: Agent): AgentMode {
 /** El Asistente de notas no habla con el cliente: no tiene modo Sugerencia/Automático. */
 function isNotesAgent(agent: Agent): boolean {
   return agent.kind === "notes";
+}
+
+/** El Asistente del sistema habla con el equipo, no con clientes: tampoco tiene modo. */
+function isSystemAgent(agent: Agent): boolean {
+  return agent.kind === "system";
+}
+
+function agentKind(agent: Agent): AgentKind {
+  return agent.kind === "notes" || agent.kind === "system" ? agent.kind : "responder";
 }
 
 /**
@@ -130,6 +142,7 @@ export function AgentsView() {
     setBusyIds((prev) => [...prev, agent.id]);
     try {
       replaceAgent(await saveAgentSettings(supabase, agent.key, changes));
+      if (isSystemAgent(agent)) notifyAssistantChanged();
       if (changes.enabled !== undefined) toast.success(`${agent.name}: ${changes.enabled ? "activo" : "inactivo"}`);
     } catch (error) {
       replaceAgent(agent);
@@ -384,7 +397,20 @@ export function AgentsView() {
                   lo que se editó en una NO se pierde al ir a la otra (antes Radix las
                   desmontaba y los cambios sin guardar desaparecían sin aviso). */}
               <TabsContent forceMount value="config" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-                {isNotesAgent(configAgent) ? (
+                {isSystemAgent(configAgent) ? (
+                  <SystemConfigForm
+                    key={configAgent.updated_at}
+                    agent={configAgent}
+                    limits={limitsById[configAgent.id] ?? DEFAULT_LIMITS}
+                    canEdit={isAdmin}
+                    onDirtyChange={(d) => setDirty((prev) => (prev.config === d ? prev : { ...prev, config: d }))}
+                    onSaved={(saved) => {
+                      replaceAgent(saved);
+                      setReloadKey((k) => k + 1);
+                      notifyAssistantChanged();
+                    }}
+                  />
+                ) : isNotesAgent(configAgent) ? (
                   <NotesConfigForm
                     key={configAgent.updated_at}
                     agent={configAgent}
@@ -415,7 +441,7 @@ export function AgentsView() {
                   <LockedConfigForm
                     agentId={configAgent.id}
                     agentKey={configAgent.key}
-                    kind={isNotesAgent(configAgent) ? "notes" : "responder"}
+                    kind={agentKind(configAgent)}
                     onDirtyChange={(d) => setDirty((prev) => (prev.locked === d ? prev : { ...prev, locked: d }))}
                     onSaved={() => setReloadKey((k) => k + 1)}
                   />
@@ -481,7 +507,13 @@ function AgentIdentity({ agent }: { agent: Agent }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
       <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-marca-suave text-marca-texto">
-        {isNotesAgent(agent) ? <NotebookPenIcon className="size-5" aria-hidden /> : <BotIcon className="size-5" aria-hidden />}
+        {isSystemAgent(agent) ? (
+          <SparklesIcon className="size-5" aria-hidden />
+        ) : isNotesAgent(agent) ? (
+          <NotebookPenIcon className="size-5" aria-hidden />
+        ) : (
+          <BotIcon className="size-5" aria-hidden />
+        )}
       </div>
       <div className="min-w-0">
         <p className="font-medium">{agent.name}</p>
@@ -514,6 +546,9 @@ function StatusControl({ agent, limits, canEdit, busy, onUpdate }: RowProps) {
 function ModeControl({ agent, canEdit, busy, onUpdate }: RowProps) {
   if (isNotesAgent(agent)) {
     return <span className="text-sm text-texto-suave">Solo notas internas</span>;
+  }
+  if (isSystemAgent(agent)) {
+    return <span className="text-sm text-texto-suave">Solo para tu equipo</span>;
   }
   return (
     <ToggleGroup

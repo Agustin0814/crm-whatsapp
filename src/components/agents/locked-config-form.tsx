@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchLockedConfig, saveLockedConfig, type AgentLockedConfig } from "@/lib/agents/client";
 import type { AgentKind } from "@/lib/agents/config";
+import { SYSTEM_TOOL_LABELS, SYSTEM_TOOL_NAMES, TOOL_FLOOR, ROLE_RANK, type AssistantRole } from "@/lib/agents/system-plan";
 import { errorMessage } from "@/lib/crm/contacts";
 import { createClient } from "@/lib/supabase/client";
 import { ConfigSection } from "./config-section";
@@ -67,7 +68,23 @@ const FIELD_LABELS: Partial<Record<keyof Values, string>> = {
   history_window_messages: "mensajes por pasada",
   summary_max_chars: "largo del resumen",
   kill_switch: "kill switch",
+  max_tool_calls: "consultas por pregunta",
+  history_max_tokens: "tokens de historial",
+  tool_result_max_chars: "largo de cada resultado",
+  per_person_daily_ceiling: "máx. preguntas por persona",
+  tool_min_roles: "roles por herramienta",
+  request_ttl_seconds: "caducidad de las solicitudes",
 };
+
+const ROLE_OPTIONS: { value: AssistantRole; label: string }[] = [
+  { value: "agent", label: "Agente" },
+  { value: "admin", label: "Administrador" },
+  { value: "superadmin", label: "Proveedor" },
+];
+
+function roleOverrides(value: unknown): Record<string, AssistantRole> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, AssistantRole>) : {};
+}
 
 /** Compara un campo enviado con el guardado (los numeric pueden volver como texto). */
 function sameValue(a: unknown, b: unknown): boolean {
@@ -92,6 +109,7 @@ type Props = {
 
 export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChange }: Props) {
   const isNotes = kind === "notes";
+  const isSystem = kind === "system";
   const supabase = createClient();
   const { profiles } = useCrm();
   const [values, setValues] = useState<Values | null>(null);
@@ -200,7 +218,7 @@ export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChan
           </div>
         </ConfigSection>
 
-        {!isNotes && (
+        {kind === "responder" && (
           <>
             <ConfigSection title="Información del negocio" description="Única fuente de datos del asistente.">
               <Textarea
@@ -288,41 +306,76 @@ export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChan
           </ConfigSection>
         )}
 
-        <ConfigSection
-          title={isNotes ? "Silencio y avisos" : "Espera y avisos"}
-          description={
-            isNotes
-              ? "Rango de minutos de silencio del cliente (en segundos). Cada mensaje nuevo reinicia la espera, sin pasar del tope total."
-              : "Rango de espera del cliente. Cada mensaje nuevo reinicia la espera, sin pasar del tope total desde el primer mensaje sin responder."
-          }
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <NumberInput
-              id="lk-dmin"
-              label={isNotes ? "Silencio mínimo (s, desde 60)" : "Espera mínima (s)"}
-              value={values.delay_seconds_min}
-              onChange={(v) => set("delay_seconds_min", v)}
-            />
-            <NumberInput
-              id="lk-dmax"
-              label={isNotes ? "Silencio máximo (s, hasta 86400)" : "Espera máxima (s, hasta 3600)"}
-              value={values.delay_seconds_max}
-              onChange={(v) => set("delay_seconds_max", v)}
-            />
-            <NumberInput
-              id="lk-maxwait"
-              label={isNotes ? "Tope de espera total (s, 60–86400)" : "Tope de espera total (s, 10–600)"}
-              value={values.max_wait_seconds}
-              onChange={(v) => set("max_wait_seconds", v)}
-            />
-            <NumberInput
-              id="lk-threshold"
-              label="Aviso de límite del mes (%)"
-              value={values.monthly_alert_threshold_pct}
-              onChange={(v) => set("monthly_alert_threshold_pct", v)}
-            />
-          </div>
-        </ConfigSection>
+        {isSystem && (
+          <ConfigSection title="Consultas e historial" description="Cuánto puede consultar y recordar en cada pregunta.">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <NumberInput id="lk-tools" label="Consultas a herramientas por pregunta (1–10)" value={values.max_tool_calls} onChange={(v) => set("max_tool_calls", v)} />
+              <NumberInput
+                id="lk-hist"
+                label="Mensajes de historial (10–300)"
+                value={values.history_window_messages}
+                onChange={(v) => set("history_window_messages", v)}
+              />
+              <NumberInput id="lk-histtok" label="Tokens de historial (1000–50000)" value={values.history_max_tokens} onChange={(v) => set("history_max_tokens", v)} />
+              <NumberInput
+                id="lk-result"
+                label="Caracteres por resultado (500–20000)"
+                value={values.tool_result_max_chars}
+                onChange={(v) => set("tool_result_max_chars", v)}
+              />
+              <NumberInput
+                id="lk-ttl"
+                label="Caducidad de una solicitud (s, 60–3600)"
+                value={values.request_ttl_seconds}
+                onChange={(v) => set("request_ttl_seconds", v)}
+              />
+              <NumberInput
+                id="lk-threshold-s"
+                label="Aviso de límite del mes (%)"
+                value={values.monthly_alert_threshold_pct}
+                onChange={(v) => set("monthly_alert_threshold_pct", v)}
+              />
+            </div>
+          </ConfigSection>
+        )}
+
+        {!isSystem && (
+          <ConfigSection
+            title={isNotes ? "Silencio y avisos" : "Espera y avisos"}
+            description={
+              isNotes
+                ? "Rango de minutos de silencio del cliente (en segundos). Cada mensaje nuevo reinicia la espera, sin pasar del tope total."
+                : "Rango de espera del cliente. Cada mensaje nuevo reinicia la espera, sin pasar del tope total desde el primer mensaje sin responder."
+            }
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <NumberInput
+                id="lk-dmin"
+                label={isNotes ? "Silencio mínimo (s, desde 60)" : "Espera mínima (s)"}
+                value={values.delay_seconds_min}
+                onChange={(v) => set("delay_seconds_min", v)}
+              />
+              <NumberInput
+                id="lk-dmax"
+                label={isNotes ? "Silencio máximo (s, hasta 86400)" : "Espera máxima (s, hasta 3600)"}
+                value={values.delay_seconds_max}
+                onChange={(v) => set("delay_seconds_max", v)}
+              />
+              <NumberInput
+                id="lk-maxwait"
+                label={isNotes ? "Tope de espera total (s, 60–86400)" : "Tope de espera total (s, 10–600)"}
+                value={values.max_wait_seconds}
+                onChange={(v) => set("max_wait_seconds", v)}
+              />
+              <NumberInput
+                id="lk-threshold"
+                label="Aviso de límite del mes (%)"
+                value={values.monthly_alert_threshold_pct}
+                onChange={(v) => set("monthly_alert_threshold_pct", v)}
+              />
+            </div>
+          </ConfigSection>
+        )}
 
         <ConfigSection title="Modelo" description="Proveedor OpenAI (Responses API).">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -371,7 +424,52 @@ export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChan
               <p className="text-xs text-texto-suave">Vacía = la del modelo (los de razonamiento no la aceptan).</p>
             </div>
           </div>
-          {!isNotes && (
+          {isSystem && (
+            <div className="space-y-2">
+              <Label>Herramientas y rol mínimo</Label>
+              <p className="text-xs text-texto-suave">Una herramienta apagada no se le ofrece al modelo. El rol nunca baja del mínimo del sistema.</p>
+              <ul className="divide-y rounded-xl border">
+                {SYSTEM_TOOL_NAMES.map((name) => {
+                  const overrides = roleOverrides(values.tool_min_roles);
+                  const role = overrides[name] && ROLE_RANK[overrides[name]] > ROLE_RANK[TOOL_FLOOR[name]] ? overrides[name] : TOOL_FLOOR[name];
+                  return (
+                    <li key={name} className="flex items-center gap-3 px-3 py-2">
+                      <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={values.allowed_tools.includes(name)}
+                          onCheckedChange={(on) =>
+                            set("allowed_tools", on ? [...values.allowed_tools, name] : values.allowed_tools.filter((x) => x !== name))
+                          }
+                        />
+                        <span className="truncate">{SYSTEM_TOOL_LABELS[name]}</span>
+                      </label>
+                      <Select
+                        value={role}
+                        onValueChange={(v) => {
+                          const next = { ...overrides };
+                          if (v === TOOL_FLOOR[name]) delete next[name];
+                          else next[name] = v as AssistantRole;
+                          set("tool_min_roles", next);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-40" aria-label={`Rol mínimo de ${SYSTEM_TOOL_LABELS[name]}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent position="popper">
+                          {ROLE_OPTIONS.filter((o) => ROLE_RANK[o.value] >= ROLE_RANK[TOOL_FLOOR[name]]).map((o) => (
+                            <SelectItem key={o.value} value={o.value}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          {kind === "responder" && (
             <div className="space-y-2">
               <Label>Herramientas permitidas</Label>
               {TOOLS.map((t) => (
@@ -391,17 +489,26 @@ export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChan
 
         <ConfigSection title="Techos y costos" description="El cliente no puede superar estos valores.">
           <div className="grid gap-4 sm:grid-cols-2">
-            {!isNotes && (
+            {kind === "responder" && (
               <NumberInput id="lk-cons" label="Máx. respuestas seguidas (1–10)" value={values.max_consecutive_ceiling} onChange={(v) => set("max_consecutive_ceiling", v)} />
             )}
-            <NumberInput
-              id="lk-daily"
-              label={isNotes ? "Máx. pasadas por día" : "Tope diario máximo"}
-              value={values.daily_cap_ceiling}
-              onChange={(v) => set("daily_cap_ceiling", v)}
-            />
+            {isSystem ? (
+              <NumberInput
+                id="lk-perperson"
+                label="Máx. preguntas por persona al día (1–1000)"
+                value={values.per_person_daily_ceiling}
+                onChange={(v) => set("per_person_daily_ceiling", v)}
+              />
+            ) : (
+              <NumberInput
+                id="lk-daily"
+                label={isNotes ? "Máx. pasadas por día" : "Tope diario máximo"}
+                value={values.daily_cap_ceiling}
+                onChange={(v) => set("daily_cap_ceiling", v)}
+              />
+            )}
             <NumberInput id="lk-month" label="Tope mensual de tokens" value={values.monthly_token_cap} onChange={(v) => set("monthly_token_cap", v)} />
-            {!isNotes && <div />}
+            {kind === "responder" && <div />}
             <NumberInput id="lk-in" label="USD por millón (entrada)" step="0.01" value={Number(values.input_price_per_mtok)} onChange={(v) => set("input_price_per_mtok", v)} />
             <NumberInput id="lk-out" label="USD por millón (salida)" step="0.01" value={Number(values.output_price_per_mtok)} onChange={(v) => set("output_price_per_mtok", v)} />
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { BotIcon, LogOutIcon, MonitorIcon, MoonIcon, SunIcon, type LucideIcon } from "lucide-react";
+import { BotIcon, LogOutIcon, MonitorIcon, MoonIcon, SparklesIcon, SunIcon, type LucideIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -26,6 +26,8 @@ import { ROLE_LABELS, type Role } from "@/lib/crm/types";
 import { writeSidebarCookie } from "@/lib/sidebar";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { AssistantBubble } from "@/components/assistant/assistant-bubble";
+import { useAssistant } from "@/components/assistant/assistant-provider";
 import { SidebarLogo } from "./brand-logo";
 import { ContactAvatar } from "./contact-avatar";
 import { profileName, useCrm } from "./crm-provider";
@@ -38,6 +40,8 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/contactos", label: "Contactos", icon: "contactos" },
   // Provisional: Bot de lucide hasta que exista public/icons/icon-agentes.svg.
   { href: "/agentes", label: "Agentes", icon: BotIcon },
+  // Provisional: Sparkles de lucide hasta que exista public/icons/icon-asistente.svg.
+  { href: "/asistente", label: "Asistente", icon: SparklesIcon },
   { href: "/estadisticas", label: "Estadísticas", icon: "estadisticas" },
   { href: "/configuracion", label: "Configuración", icon: "configuracion" },
 ];
@@ -88,6 +92,8 @@ export function AppShell({ children, initialCollapsed }: { children: ReactNode; 
           {children}
         </main>
         {!hideBottomNav && <BottomNav />}
+        {/* Fuera de <main>: la animación de entrada de sección no afecta a su position: fixed. */}
+        <AssistantBubble />
       </div>
     </ShellContext>
   );
@@ -155,8 +161,14 @@ const CAPA_FILA =
   "pointer-events-none absolute inset-y-0 inset-x-2 rounded-xl transition-colors group-focus-visible/fila:ring-2 group-focus-visible/fila:ring-marca";
 
 /** Índice de la sección activa según la ruta (las subrutas cuentan como su sección); -1 si ninguna. */
-function activeIndex(pathname: string): number {
-  return NAV_ITEMS.findIndex((item) => isActive(pathname, item.href));
+function activeIndex(pathname: string, items: NavItem[]): number {
+  return items.findIndex((item) => isActive(pathname, item.href));
+}
+
+/** Opciones visibles: «Asistente» solo si el agente está activo, el rol puede usarlo y hay chats guardados. */
+function useNavItems(): NavItem[] {
+  const { availability } = useAssistant();
+  return useMemo(() => NAV_ITEMS.filter((item) => item.href !== "/asistente" || availability.savedChats), [availability.savedChats]);
 }
 
 // --- Barra lateral -----------------------------------------------------------
@@ -200,7 +212,8 @@ function Sidebar({ initialCollapsed }: { initialCollapsed: boolean }) {
   // Estado efectivo según el ancho (el CSS ya lo pinta; esto es para ARIA y tooltips).
   const expanded = isDesktop ? !collapsed : overlayOpen;
   const overlay = !isDesktop && overlayOpen;
-  const current = pending ?? activeIndex(pathname);
+  const items = useNavItems();
+  const current = pending ?? activeIndex(pathname, items);
 
   function toggle() {
     if (isDesktop) {
@@ -287,7 +300,7 @@ function Sidebar({ initialCollapsed }: { initialCollapsed: boolean }) {
             <span className="absolute inset-y-2 -left-2 w-1 rounded-r-full bg-lateral-acento" />
           </li>
 
-          {NAV_ITEMS.map((item, index) => {
+          {items.map((item, index) => {
             const active = index === current;
             const badge = item.href === "/" ? unreadConversations : 0;
             const link = (
@@ -490,12 +503,13 @@ function UserMenu({ expanded }: { expanded: boolean }) {
 function BottomNav() {
   const pathname = usePathname();
   const { unreadConversations } = useNotifications();
+  const items = useNavItems();
   return (
     <nav
       aria-label="Navegación principal"
       className="fixed inset-x-0 bottom-0 z-40 flex border-t border-lateral-borde bg-lateral pb-[env(safe-area-inset-bottom)] md:hidden"
     >
-      {NAV_ITEMS.map((item) => {
+      {items.map((item) => {
         const active = isActive(pathname, item.href);
         const badge = item.href === "/" ? unreadConversations : 0;
         return (

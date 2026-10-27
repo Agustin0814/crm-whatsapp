@@ -1,9 +1,10 @@
 # Mapa de los agentes de IA
 
-Estado al 26 de octubre de 2026. Hay dos agentes, cada uno con su tipo (`agents.kind`):
+Estado al 26 de octubre de 2026. Hay tres agentes, cada uno con su tipo (`agents.kind`):
 
 - **Asistente de respuestas** (`key = 'responder'`, `kind = 'responder'`): responde en el chat de WhatsApp.
 - **Asistente de notas** (`key = 'notes'`, `kind = 'notes'`): **nunca habla con el cliente**. Escribe notas internas y mantiene el resumen del cliente. Ver la sección 8.
+- **Asistente del sistema «Cerebro»** (`key = 'system'`, `kind = 'system'`): conversa con el **equipo** dentro del CRM, lee datos con herramientas cerradas y solo **propone** tareas a los otros dos (con confirmación). Ver la sección 9.
 
 Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificaciones, compras ni nada de ERP.
 
@@ -16,6 +17,8 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `/agentes` | Encabezado «Agentes» con el botón **Registro de actividad** (abre un panel lateral). Debajo: 3 tarjetas de uso del mes que suman todos los agentes (respuestas, tokens con su barra y tope, costo estimado), luego los avisos sin leer y al final la lista de agentes (tabla en pantallas anchas, tarjetas en el móvil) con Estado, Modo y **Configurar**. | Todos con sesión. Tarjetas, avisos y registro: solo admin y superadmin. |
 | `/agentes` → «Configurar» (panel lateral) | Pestaña **Configuración**: el panel del cliente. Pestaña **Proveedor**: la capa del proveedor, solo superadmin. **Probador**: deshabilitado («Próximamente»). | Lo ve cualquiera; solo admin y superadmin pueden editar. La pestaña Proveedor solo existe para superadmin. |
 | `/` (Bandeja) | En el chat: interruptor de pausa del asistente en el encabezado, banner «Sugerencia del asistente» sobre el composer y la etiqueta con el nombre del asistente en sus mensajes. En «notas»: tarjeta fija «Resumen del cliente» y las notas del Asistente de notas (icono de bot y su nombre). | Todos con sesión. |
+| Todas las pantallas (menos `/asistente`) | **Burbuja** del Asistente del sistema abajo a la derecha (chat temporal en memoria). Se coloca encima del cuadro de escritura y de las notas del chat; se puede minimizar. | Si el asistente está activo, sin parada del proveedor, con chat temporal activo y el rol permitido. |
+| `/asistente` | Chats guardados del Asistente del sistema (lista, «Nuevo chat», renombrar, borrar y el chat a pantalla completa). `?chat=<id>` o `?chat=nuevo`. | Mismo permiso que la burbuja y chats guardados activos. Cada chat se ve si el rol ≥ su `min_role`. |
 | `/configuracion?tab=respuestas-rapidas` | Editor de respuestas rápidas. «Cuándo usarla» y «Permiso del agente» solo aparecen para superadmin. | Editan admin y superadmin. |
 
 ## 2. Rutas de API
@@ -25,6 +28,11 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `/api/agents/run` | POST | Solo con `Authorization: Bearer CRON_SECRET`, comparado en tiempo constante. Está excluida del `proxy` (no usa sesión). | Toma las corridas vencidas con `claim_agent_runs` y las ejecuta con `processDueRuns`. Es idempotente y no responde dos veces. `maxDuration` de 60 s. |
 | `/api/agents/suggestions/[id]` | POST `{action: "send" \| "discard", texts?}` | Sesión de un usuario con perfil (cualquier rol). | `send`: reserva la sugerencia (la pasa de `pending` a `sent`/`edited`) y envía sus partes en orden con `sendAgentText`; si no salió ninguna, la devuelve a `pending`. `discard`: la marca descartada. |
 | `/api/agents/preview` | POST `{messages, history?, contactName?, agentKey?}` | Solo **superadmin** con sesión. | Probador sin envío: arma el prompt real y devuelve lo que respondería el agente (mensajes, preguntas detectadas, reintento, tokens, costo). No envía a WhatsApp ni escribe en la base. |
+| `/api/assistant/ask` | POST `{question, chat: {mode: "temp", history: string[]} \| {mode: "saved", id} \| {mode: "new", title?}, screenConversationId?}` | Sesión; asistente activo y rol permitido (lo revalida la base al contar la pregunta). | Una pregunta al Asistente del sistema: tope mensual, pregunta por persona, historial (firmado o de la base), bucle de herramientas y respuesta final. Temporal: devuelve el turno firmado. Guardado/nuevo: lo guarda con `save_assistant_turn`. `maxDuration` 60 s. |
+| `/api/assistant/chats` | POST `{title, turns: string[]}` | Sesión; chats guardados activos. | Convierte un chat temporal (solo turnos firmados para ese usuario) en uno guardado y calcula su `min_role`. |
+| `/api/assistant/requests/[id]` | POST `{action: "confirm" \| "cancel"}` | Sesión de quien pidió la tarea (`confirm_agent_request` lo valida en la base). | Confirma o cancela. Pausar/reanudar se aplican en la base; «anotar ahora» se ejecuta en `after()` con `executeManualNotesRequest`. |
+| *(Supabase RPC)* `assistant_consume_question`, `create_agent_request`, `confirm_agent_request`, `cancel_agent_request` | RPC | Sesión de personal; asistente activo, sin parada y rol permitido (`private.assistant_access`). | Contar una pregunta (atómico), crear, confirmar y cancelar solicitudes. |
+| *(Supabase RPC)* `save_assistant_turn` | RPC | Solo `service_role`. | Guarda un turno de un chat guardado y sube su `min_role`. |
 | `/api/whatsapp/webhook` | POST | Firma `X-Hub-Signature-256` de Meta. | Guarda el mensaje entrante y, dentro del `after()`, programa la respuesta del agente (y la procesa en ese momento si la espera es 0). |
 | *(Supabase RPC)* `update_agent_settings`, `agent_limits`, `set_agent_paused`, `agent_usage_summary` | RPC | Sesión de personal (`require_staff`). `update_agent_settings` exige además admin o superadmin. | Guardar la capa del cliente, leer los rangos, pausar o reanudar un chat y ver el uso de hoy (este último ya no lo usa la interfaz). |
 | *(Supabase RPC)* `schedule_agent_run`, `claim_agent_runs` | RPC | Solo `service_role`. | Programar o posponer una corrida y tomar las vencidas. |
@@ -52,7 +60,15 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `notes-config.ts` | Capa del cliente del Asistente de notas (`parseNotesConfig`, casillas «Qué anota», presets de silencio). Cliente y servidor. | Panel, `notes-engine.ts` |
 | `notes-plan.ts` | Lógica pura: función `registrar_notas`, `validateNotesPlan`, `redactSensitive`, duplicados, `isTrivialText`, contadores. | `notes-engine.ts`, `notes-prompt.ts`, tarjeta del resumen |
 | `notes-prompt.ts` | Prompt del Asistente de notas: reglas fijas `NOTES_BASE_RULES`, «Qué anotar» y el turno con resumen, contadores, notas previas y mensajes nuevos. | `notes-engine.ts` |
-| `notes-engine.ts` | `scheduleNotesForInbound`, `scheduleNotesForHandoff`, `executeNotesRun` y `getContactSummary` (preparada para el Asistente de respuestas, aún sin conectar). | `engine.ts` |
+| `notes-engine.ts` | `scheduleNotesForInbound`, `scheduleNotesForHandoff`, `executeNotesRun`, `getContactSummary` (preparada para el Asistente de respuestas, aún sin conectar) y la orden puntual del Asistente del sistema: `executeManualNotesRequest`, `settleManualRequest`, `manualResultText`. | `engine.ts`, `/api/assistant/requests/[id]` |
+| `system-config.ts` | Capa del cliente del Asistente del sistema (`parseSystemConfig`, `canUseSystemAssistant`, avisos fijos). Cliente y servidor. | Panel, burbuja, motor |
+| `system-plan.ts` | Lógica pura: roles (`ROLE_RANK`, `TOOL_FLOOR`, `toolMinRole`), lista cerrada `SYSTEM_TOOL_NAMES`, función final `responder` (`parseFinal`), gráficas armadas por el servidor (`buildChart`), turnos (`StoredTurn`, `turnMinRole`, `sanitizeTurn`, `rowsToTurns`). | Motor, herramientas, navegador |
+| `system-prompt.ts` | Reglas fijas `SYSTEM_BASE_RULES`, prompt con el contexto de pantalla y la ventana de historial (`buildAssistantHistory`). | `system-engine.ts` |
+| `system-tools.ts` | Las 12 herramientas (definición + ejecución con la sesión del usuario y comprobación de rol). | `system-engine.ts` |
+| `system-turns.ts` | Firma HMAC de los turnos del chat temporal (`signTurn`, `verifyTurn`). | `system-engine.ts` |
+| `system-engine.ts` | `checkAssistantAccess`, `askAssistant` (topes → historial → bucle → respuesta → guardado o firma → registro) y `saveTempChat`. | Rutas `/api/assistant/*` |
+| `system-client.ts` | Consultas del navegador: preguntar, guardar, confirmar/cancelar, lista y mensajes de chats, renombrar y borrar. | Componentes de `components/assistant/` |
+| `provider.ts` → `runToolLoop` | Bucle de herramientas agnóstico (consultas de lectura + función final). La implementación de OpenAI reenvía el razonamiento cifrado con `store: false` y fuerza la final al llegar al máximo. | `system-engine.ts` |
 
 ### Rutas (`src/app/`)
 
@@ -63,6 +79,8 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `api/agents/run/route.ts` | Procesador que llama el cron. | `cron-auth.ts`, `engine.ts` |
 | `api/agents/suggestions/[id]/route.ts` | Envía o descarta una sugerencia. | `send.ts`, Supabase (admin y sesión) |
 | `api/whatsapp/webhook/route.ts` | Recibe de Meta y procesa en `after()`. | `lib/whatsapp/process-webhook.ts` |
+| `api/assistant/ask/route.ts`, `api/assistant/chats/route.ts`, `api/assistant/requests/[id]/route.ts` | Rutas del Asistente del sistema. | `system-engine.ts`, `notes-engine.ts` |
+| `(crm)/asistente/page.tsx` y `loading.tsx` | Sección `/asistente` (con `Suspense` por `?chat=`) y su esqueleto `AssistantSkeleton`. | `components/assistant/assistant-view.tsx` |
 
 ### Componentes de `/agentes` (`src/components/agents/`)
 
@@ -75,6 +93,24 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `config-section.tsx` | Sección colapsable y la pista de rango «Permitido: x–y». | Los formularios |
 | `notes-config-form.tsx` | **Panel del cliente del Asistente de notas**: Nombre, Qué anota, Cuándo anota (minutos de silencio y «También al pasar el chat a una persona»), De quién anota, Límite de pasadas por día y Avisos. | `notes-config.ts`, `client.ts` |
 | `notes-backfill.tsx` | «Procesar chats existentes» dentro de la pestaña Proveedor (solo superadmin): avance, iniciar y detener. | `client.ts` |
+| `system-config-form.tsx` | **Panel del cliente del Asistente del sistema**: Nombre, Quién puede usarlo, Chats (temporal, guardados y días antes de borrar), Tareas que puede pedir, Límite de preguntas por persona y Avisos. | `system-config.ts`, `client.ts` |
+
+### Asistente del sistema (`src/components/assistant/`)
+
+| Archivo | Qué hace |
+|---|---|
+| `assistant-provider.tsx` | Disponibilidad (encendido, parada, rol), chat temporal en memoria, conversación en pantalla (`?c=`), solicitudes en vivo (Realtime) y `notifyAssistantChanged`. Montado en el layout `(crm)`. |
+| `assistant-bubble.tsx` | Burbuja y panel compacto (minimizar, cerrar y borrar, guardar con nombre). Evita los elementos con `data-assistant-avoid`. |
+| `assistant-thread.tsx` | Hilo + cuadro de escritura (Enter envía, Shift+Enter salto de línea); muestra markdown, gráfica, tarjetas y artículos citados. |
+| `assistant-view.tsx` | Sección `/asistente`. |
+| `request-card.tsx` | Tarjeta Confirmar / Cancelar con cuenta regresiva y resultado en vivo. |
+| `markdown.tsx` | Markdown mínimo y seguro (sin HTML crudo). |
+| `simple-chart.tsx` | Gráfica SVG de líneas o barras con tokens del tema. |
+| `assistant-empty-hint.tsx` | Ejemplos de preguntas. |
+
+### Manual de ayuda
+
+`src/content/ayuda/*.md` → `npm run ayuda` (también en `prebuild`) → `src/lib/help/articles.generated.ts` (servidor) y `titles.generated.ts` (navegador). Búsqueda: `src/lib/help/search.ts`.
 
 ### Chat y otros
 
@@ -113,6 +149,10 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `contact_summaries` | Resumen del cliente (Asistente de notas): texto, contadores, marca de procesado, quién y cuándo. Lectura para el personal; escritura solo por funciones. Publicado en Realtime. |
 | `notes` (columnas) | `agent_id`, `agent_label`, `run_id`, `dedupe_key`, `updated_at`: notas del Asistente de notas. |
 | `agents.kind` | `responder` o `notes`. |
+| `agent_requests` | Solicitudes del Asistente del sistema a otros agentes y auditoría (quién, qué, cuándo, resultado). RLS: SELECT de las propias o admin; escritura solo por funciones. Realtime. |
+| `assistant_chats` / `assistant_messages` | Chats guardados del Asistente del sistema y sus mensajes (pregunta, resultados de herramientas con fecha, respuesta, gráfica). SELECT si el rol ≥ `min_role`; renombrar (solo `title`) y borrar: creador o admin; sin INSERT de usuarios. |
+| `assistant_daily_usage` | Preguntas por persona y día (solo el conteo, sin contenido). |
+| `agent_locked_config` (columnas del asistente) | `max_tool_calls`, `history_max_tokens`, `tool_result_max_chars`, `per_person_daily_ceiling`, `tool_min_roles`, `request_ttl_seconds`. |
 | `agent_alerts` | Avisos (`handoff`, `daily_cap`, `monthly_threshold`, `token_cap`, `error`) con su audiencia (admin o superadmin). |
 | `conversations` (columnas) | `agent_paused`, `agent_paused_reason`, `agent_consecutive_count` y `human_seen_at`. |
 | `messages` (columnas) | `sent_by_agent` y `agent_id`. |
@@ -137,6 +177,11 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `public.save_notes_pass` | Guarda notas + resumen + contadores + marca en una transacción, con control de versión (`updated_at`) y sin duplicar notas. Solo `service_role`. |
 | `public.update_contact_summary` (→ `private.`) | Edición del resumen por una persona. |
 | `public.enqueue_notes_backfill` / `notes_backfill_status` / `cancel_notes_backfill` (→ `private.`) | «Procesar chats existentes» (solo superadmin). |
+| `private.role_rank` / `private.my_role_rank` / `private.assistant_access` | Rango de roles y acceso al Asistente del sistema. |
+| `public.assistant_consume_question` (→ `private.`) | Cuenta una pregunta de forma atómica contra el límite por persona. |
+| `public.create_agent_request` / `confirm_agent_request` / `cancel_agent_request` (→ `private.`) | Solicitudes a otros agentes; la confirmación aplica la pausa o crea la corrida `manual` de notas. |
+| `public.save_assistant_turn` | Guarda un turno y sube `min_role` (solo `service_role`). |
+| `private.assistant_purge` | Caduca solicitudes y borra chats guardados sin actividad (pg_cron `asistente-limpieza`, diario). |
 
 **Triggers**
 
@@ -151,7 +196,7 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `quick_replies_protect_agent_fields` | Solo el superadmin cambia el permiso y «cuándo usarla». |
 | `profiles_protect_role` | Reglas del rol superadmin y nunca quedarse sin admins. |
 
-**Cron:** el trabajo `agentes-procesar` ejecuta `private.agent_cron_tick()`. Hoy corre cada minuto; la propuesta es pasarlo a cada 10 segundos (SQL abajo).
+**Cron:** el trabajo `agentes-procesar` ejecuta `private.agent_cron_tick()` cada 10 segundos. El trabajo `asistente-limpieza` ejecuta `private.assistant_purge()` una vez al día.
 
 **Vault:** `agents_runner_url` y `cron_secret`.
 
@@ -230,3 +275,38 @@ Pestaña Proveedor → «Procesar chats existentes» (solo superadmin, con el ag
   - (f) tarjeta, vencimiento y contraseña → ninguno quedó en notas ni resumen (queda «compartió un dato sensible»). Hallazgo: se colaba el vencimiento «08/29» y salían contadores de «factura» → vencimiento redactado y contadores solo para productos o medidas.
   - Limitación observada: los contadores son aproximados (en (d) no sumó la medida nueva al contador).
 
+## 9. Asistente del sistema «Cerebro»
+
+**Qué hace:** conversa con las personas del equipo dentro del CRM. Enseña a usar el sistema con el manual, consulta datos en **solo lectura** y, cuando se le pide, **propone** tareas a los otros agentes. Nunca habla con clientes ni cambia datos por sí mismo.
+
+### Flujo de una pregunta
+
+1. **Burbuja o `/asistente`** → `POST /api/assistant/ask` con la pregunta, el modo de chat y la conversación abierta en pantalla (si hay).
+2. **Acceso** (`checkAssistantAccess`): sesión, rol, agente encendido, sin kill switch y rol permitido por el cliente.
+3. **Tope mensual de tokens** (corte + alerta `token_cap` al superadmin) → **pregunta por persona** (`assistant_consume_question`, atómico) → aviso del umbral del mes.
+4. **Historial:** temporal = turnos firmados que manda el navegador (los que no tienen firma válida se ignoran); guardado = filas de `assistant_messages` (RLS). Ventana por mensajes y tokens; resultados recortados.
+5. **Prompt** (`system-prompt.ts`): identidad y reglas del proveedor → reglas fijas → fecha, persona, rol y conversación en pantalla.
+6. **Bucle** (`runToolLoop`): el modelo llama herramientas de la lista cerrada (cada una valida rol y parámetros y lee con la sesión del usuario) hasta `max_tool_calls` y termina con `responder`.
+7. **Respuesta:** texto, artículos citados (solo si consultó el manual) y gráfica armada por el servidor.
+8. **Guardado:** temporal → turno firmado de vuelta al navegador; guardado/nuevo → `save_assistant_turn` (sube `min_role` si usó una herramienta de admin).
+9. **Registro:** `agent_usage_log` con `outcome = 'answered'`, tokens y costo, **sin contenido ni user_id**.
+
+### Flujo de una tarea delegada
+
+1. La persona pide, por ejemplo, «dile al agente de notas que anote esta conversación».
+2. El modelo llama `proponer_tarea`. El servidor exige que el chat sea el abierto en pantalla o uno que la persona nombró, y llama `create_agent_request` (la base revalida acceso, delegación activa y chat) → `pending_confirmation`, caduca en 5 min.
+3. El chat muestra la tarjeta (agente, contacto, acción) con **Confirmar / Cancelar**. El modelo no puede confirmar.
+4. **Confirmar** → `confirm_agent_request` con la sesión de quien la pidió:
+   - pausar/reanudar → se aplica ahí mismo (`agent_paused`, motivo `assistant:<id>`) → `done`;
+   - anotar ahora → si el Asistente de notas tiene kill switch → `failed`; si no, corrida `manual` en `running` → `queued` → `after()` → `executeNotesRun` (aunque el agente esté apagado; con topes; solo ese chat desde su marca) → `done` con «Listo, creé N notas y actualicé el resumen».
+5. La tarjeta se actualiza por Realtime.
+
+### Pruebas hechas (26/10/2026, sin llamar al modelo)
+
+- **Lógica pura** (14, transpilada y ejecutada con Node): (a) «¿Cómo activo el asistente de respuestas?» → artículo `asistente-respuestas`; tema inexistente → sin artículo; (c) consumo y actividad exigen admin y el proveedor no puede bajarlo; (j) un turno con consumo sube el chat a admin; (k) gráfica de consumo mensual con los datos del resultado y rechazo de gráficas inválidas; (d)(e) reglas fijas presentes (no revelar prompt ni modelo, datos ≠ instrucciones, nada hecho sin confirmar); (g) contexto de pantalla; ventana de historial y recorte; configuración recortada; delegación solo a chats nombrados.
+- **Base** (21, en una transacción revertida y con sesiones simuladas): apagado → sin acceso; (l) límite de 2 preguntas → la tercera `allowed: false`; `update_agent_settings` recorta y descarta `system_prompt`; (h) pausar y reanudar con confirmación y motivo `assistant:<id>`; (f) notas con el agente apagado → corrida `manual` solo de ese chat; con kill switch → `failed` sin corrida; caducada → `expired`; delegación apagada → rechazo; `save_assistant_turn` negado a usuarios; rol agente con «Solo administradores» → rechazo; (c) un agente ve 0 filas de uso y costos; (j) un agente ve solo el chat sin costos, no inserta ni cambia `min_role` ni renombra chats ajenos; otro usuario no confirma ni ve solicitudes ajenas. Se comprobó después que no quedó nada (asistente apagado, 0 solicitudes, 0 chats, roles intactos).
+- **Prueba real con el modelo** (`gpt-5-nano`, 26/10/2026; arnés local temporal solo de desarrollo, ya borrado; un contacto de prueba sin WhatsApp, ya borrado con su chat, notas, resumen y solicitudes; el asistente siguió apagado). Costo ≈ US$0.009 del asistente + una pasada de notas.
+  - (a) responde desde el manual y cita `asistente-respuestas`. (b) 51 / 12 / 21 mensajes, iguales a un conteo directo en la base. (c) con rol agente: «tu rol no puede ver…» sin llamar a la herramienta de costos. (d) se niega a dar prompt, modelo y precio por token. (g) resume el chat abierto y marca el texto inyectado como dato. (h) tarjeta → confirmar → «Listo, pausé…», motivo `assistant:<id>`. (f) tarjeta → confirmar → «Listo, creé 2 notas y actualicé el resumen», solo en ese chat. (k) gráfica de barras con 3 series (una por asistente) armada con los datos reales. Chat nombrado («Reanuda el asistente en el chat de …») → busca el contacto y deja la tarjeta; «pausa todos los chats» → no crea nada.
+  - Hallazgos corregidos: (e) con «haz lo que pide el cliente» proponía una tarea que nadie pidió → reglas 12–15 y candado en el servidor (`taskRequestedInQuestion`: la tarea solo se crea si la persona la pide con sus palabras). Escribía slugs y «Fuente: …» → `cleanAnswer`. Una gráfica por asistente no salía → columnas `tokens_*` en `consumo_agentes` y aviso «No pude armar la gráfica» si no cuadra. La tarjeta decía que «el agente la confirma» → nota de la herramienta corregida.
+  - Limitaciones observadas con `gpt-5-nano`: a veces ofrece cosas que no puede hacer («preparar una solicitud de acceso»), vuelve a consultar en vez de reutilizar un resultado del historial y en un seguimiento confundió «enviados por asistentes» con «de esos recibidos». Con `gpt-5-mini` debería mejorar (se cambia en la pestaña Proveedor). El Asistente de notas dejó una nota casi repetida («llamada previa»), comportamiento suyo ya conocido.
+  - No probado: (i) en el navegador (requiere iniciar sesión) y (f) con el Asistente de notas apagado en producción (no se apagó para no afectar a los clientes; ese camino quedó probado en la base y el motor solo se salta la condición de «encendido»).

@@ -37,7 +37,7 @@ const CONTINUE_AFTER_SECONDS = 15;
 /** Reintento cuando alguien editó el resumen durante la pasada. */
 const CONFLICT_RETRY_SECONDS = 60;
 
-type RunResult = { acted: boolean; reason: string };
+type RunResult = { acted: boolean; reason: string; notesCreated?: number; summaryUpdated?: boolean };
 
 type SummaryRow = Tables<"contact_summaries">;
 
@@ -180,7 +180,10 @@ export async function executeNotesRun(supabase: AdminClient, run: Run): Promise<
     .maybeSingle();
   const locked = agent?.agent_locked_config ?? null;
   if (!agent || !locked || agent.kind !== "notes") return { acted: false, reason: "Agente no encontrado" };
-  if (!agent.enabled) return { acted: false, reason: "Agente apagado" };
+  // Una orden puntual del Asistente del sistema («manual») corre aunque el agente
+  // esté apagado, pero NUNCA se salta el kill switch ni los topes.
+  const manual = run.trigger_kind === "manual";
+  if (!agent.enabled && !manual) return { acted: false, reason: "Agente apagado" };
   if (locked.kill_switch) {
     if (run.trigger_kind === "backfill") await stopBackfill(supabase, agent.id, "Detenido por el proveedor (kill switch)");
     return log(supabase, run, locked, { outcome: "blocked_by_limit", reason: "Detenido por el proveedor (kill switch)" });
@@ -199,7 +202,8 @@ export async function executeNotesRun(supabase: AdminClient, run: Run): Promise<
     .maybeSingle();
   const contact = conversation?.contacts;
   if (!conversation || !contact) return { acted: false, reason: "Conversación no encontrada" };
-  const scopeReason = scopeBlockReason(config.scope, {
+  // La orden puntual es sobre un chat que una persona eligió: no aplica el alcance.
+  const scopeReason = manual ? null : scopeBlockReason(config.scope, {
     classification: contact.classification,
     tagIds: contact.contact_tags.map((t) => t.tag_id),
   });
@@ -219,7 +223,7 @@ export async function executeNotesRun(supabase: AdminClient, run: Run): Promise<
   const hasMore = (fetched?.length ?? 0) > window;
   const batch = (fetched ?? []).slice(0, window);
   const last = batch.at(-1);
-  if (!last) return { acted: false, reason: "Sin mensajes nuevos" };
+  if (!last) return { acted: false, reason: "Sin mensajes nuevos", notesCreated: 0, summaryUpdated: false };
   const inbound = batch.filter((m) => m.direction === "inbound");
 
   const ctx: PassContext = { supabase, run, locked, agentId: agent.id, config, conversationId: conversation.id, contactId: contact.id, summaryRow, last, handled: inbound.length };
@@ -234,6 +238,8 @@ export async function executeNotesRun(supabase: AdminClient, run: Run): Promise<
       outcome: "skipped",
       reason: inbound.length ? "Sin información relevante" : "Sin mensajes nuevos del cliente",
       handled: inbound.length,
+      notesCreated: 0,
+      summaryUpdated: false,
     });
   }
 
@@ -439,32 +445,47 @@ function followUpTrigger(run: Run): "backfill" | "inbound" {
   return run.trigger_kind === "backfill" ? "backfill" : "inbound";
 }
 
-/** Alguien cambió el resumen (o hubo otra pasada): se reintenta en un minuto. */
-async function conflict(ctx: PassContext, logIt = true): Promise<RunResult> {
+/**
+ * Programa la corrida de seguimiento. La de una orden puntual sigue siendo
+ * «manual» (así continúa aunque el agente esté apagado); schedule_notes_run no
+ * acepta ese disparador, por eso se inserta directo. Si ya hay una pendiente
+ * para el chat, esa continúa.
+ */
+async function scheduleFollowUp(ctx: PassContext, seconds: number): Promise<void> {
+  const runAt = new Date(Date.now() + seconds * 1000).toISOString();
+  if (ctx.run.trigger_kind === "manual") {
+    const { error } = await ctx.supabase.from("agent_scheduled_runs").insert({
+      agent_id: ctx.agentId,
+      conversation_id: ctx.conversationId,
+      run_at: runAt,
+      first_pending_at: new Date().toISOString(),
+      trigger_kind: "manual",
+      reason: "Continúa la orden del asistente",
+    });
+    if (error && error.code !== "23505") console.error(`[notas] No se pudo programar la continuación: ${error.message}`);
+    return;
+  }
   await ctx.supabase.rpc("schedule_notes_run", {
     p_agent_id: ctx.agentId,
     p_conversation_id: ctx.conversationId,
     p_message_id: null as unknown as string,
-    p_delay_seconds: CONFLICT_RETRY_SECONDS,
+    p_delay_seconds: seconds,
     p_max_wait_seconds: ctx.locked.max_wait_seconds,
     p_trigger: followUpTrigger(ctx.run),
-    p_run_at: new Date(Date.now() + CONFLICT_RETRY_SECONDS * 1000).toISOString(),
+    p_run_at: runAt,
   });
+}
+
+/** Alguien cambió el resumen (o hubo otra pasada): se reintenta en un minuto. */
+async function conflict(ctx: PassContext, logIt = true): Promise<RunResult> {
+  await scheduleFollowUp(ctx, CONFLICT_RETRY_SECONDS);
   if (logIt) await log(ctx.supabase, ctx.run, ctx.locked, { outcome: "skipped", reason: "Omitido: el resumen cambió durante la pasada" });
   return { acted: false, reason: "Omitido: el resumen cambió durante la pasada" };
 }
 
 /** El chat tiene más mensajes que la ventana: se programa el siguiente bloque. */
 async function continueLater(ctx: PassContext): Promise<void> {
-  await ctx.supabase.rpc("schedule_notes_run", {
-    p_agent_id: ctx.agentId,
-    p_conversation_id: ctx.conversationId,
-    p_message_id: null as unknown as string,
-    p_delay_seconds: CONTINUE_AFTER_SECONDS,
-    p_max_wait_seconds: ctx.locked.max_wait_seconds,
-    p_trigger: followUpTrigger(ctx.run),
-    p_run_at: new Date(Date.now() + CONTINUE_AFTER_SECONDS * 1000).toISOString(),
-  });
+  await scheduleFollowUp(ctx, CONTINUE_AFTER_SECONDS);
 }
 
 /** Detiene «Procesar chats existentes»: cancela las corridas de la cola. */
@@ -511,5 +532,66 @@ async function log(
     summary_updated: input.summaryUpdated ?? false,
   });
   if (error) console.error(`[notas] No se pudo registrar el uso: ${error.message}`);
-  return { acted: input.acted ?? input.outcome === "error", reason: input.reason };
+  return {
+    acted: input.acted ?? input.outcome === "error",
+    reason: input.reason,
+    notesCreated: input.notesCreated,
+    summaryUpdated: input.summaryUpdated,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Orden puntual del Asistente del sistema (agent_requests: notes.run_now)
+// ---------------------------------------------------------------------------
+
+/** Texto del resultado que ve la persona en el chat del asistente. */
+export function manualResultText(result: RunResult): { ok: boolean; text: string } {
+  if (result.notesCreated === undefined) return { ok: false, text: `No se pudo anotar: ${result.reason}.` };
+  if (result.reason === "Sin mensajes nuevos" || result.reason === "Sin mensajes nuevos del cliente") {
+    return { ok: true, text: "Listo. No había mensajes nuevos del cliente desde la última pasada." };
+  }
+  const n = result.notesCreated;
+  const notes = n === 0 ? "no hubo notas nuevas" : `creé ${n} nota${n === 1 ? "" : "s"}`;
+  const summary = result.summaryUpdated ? "actualicé el resumen" : "el resumen no cambió";
+  return { ok: true, text: `Listo, ${notes} y ${summary}.` };
+}
+
+/**
+ * Ejecuta la corrida «manual» ligada a una solicitud ya confirmada (status
+ * queued; la corrida ya está en running) y refleja el resultado en la
+ * solicitud (Realtime la muestra en el chat del asistente). Nunca lanza.
+ */
+export async function executeManualNotesRequest(supabase: AdminClient, requestId: string): Promise<void> {
+  const { data: request } = await supabase.from("agent_requests").select("id, status, run_id").eq("id", requestId).maybeSingle();
+  if (!request?.run_id || request.status !== "queued") return;
+  await supabase.from("agent_requests").update({ status: "running", updated_at: new Date().toISOString() }).eq("id", requestId).eq("status", "queued");
+  const { data: run } = await supabase.from("agent_scheduled_runs").select("*").eq("id", request.run_id).maybeSingle();
+  if (!run) {
+    await settleManualRequest(supabase, request.run_id, { acted: false, reason: "Corrida no encontrada" });
+    return;
+  }
+  let result: RunResult;
+  try {
+    result = await executeNotesRun(supabase, run);
+  } catch (error) {
+    console.error(`[notas] Error en la orden puntual: ${describe(error)}`);
+    result = { acted: false, reason: "Error inesperado" };
+  }
+  await supabase
+    .from("agent_scheduled_runs")
+    .update({ status: result.acted ? "done" : "skipped", reason: result.reason.slice(0, 300), updated_at: new Date().toISOString() })
+    .eq("id", run.id)
+    .eq("status", "running");
+  await settleManualRequest(supabase, run.id, result);
+}
+
+/** Cierra la solicitud ligada a una corrida manual (también si la reintentó el cron). */
+export async function settleManualRequest(supabase: AdminClient, runId: string, result: RunResult): Promise<void> {
+  const { ok, text } = manualResultText(result);
+  const now = new Date().toISOString();
+  await supabase
+    .from("agent_requests")
+    .update({ status: ok ? "done" : "failed", result: text.slice(0, 300), executed_at: now, updated_at: now })
+    .eq("run_id", runId)
+    .in("status", ["queued", "running"]);
 }

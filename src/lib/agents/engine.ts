@@ -33,7 +33,7 @@ import {
   type CoverageEntry,
   type PlanValidation,
 } from "./reply-plan";
-import { executeNotesRun, scheduleNotesForHandoff, scheduleNotesForInbound } from "./notes-engine";
+import { executeNotesRun, scheduleNotesForHandoff, scheduleNotesForInbound, settleManualRequest } from "./notes-engine";
 import { AgentSendError, sendAgentText } from "./send";
 import { alertOnce, describe, periodStarts, type AdminClient } from "./shared";
 
@@ -173,7 +173,16 @@ export async function processDueRuns(supabase: AdminClient, limit = 10): Promise
   })();
   const notes = (async () => {
     for (let i = 0; i < notesRuns.length; i += NOTES_CONCURRENCY) {
-      await Promise.all(notesRuns.slice(i, i + NOTES_CONCURRENCY).map((run) => finishRun(supabase, run, () => executeNotesRun(supabase, run))));
+      await Promise.all(
+        notesRuns.slice(i, i + NOTES_CONCURRENCY).map((run) =>
+          finishRun(supabase, run, async () => {
+            const result = await executeNotesRun(supabase, run);
+            // Orden puntual del Asistente del sistema reintentada por el cron: se cierra su solicitud.
+            if (run.trigger_kind === "manual") await settleManualRequest(supabase, run.id, result);
+            return result;
+          }),
+        ),
+      );
     }
   })();
   await Promise.all([replies, notes]);

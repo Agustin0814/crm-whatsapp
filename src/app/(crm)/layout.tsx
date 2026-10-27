@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { Suspense, type ReactNode } from "react";
+import { AssistantProvider } from "@/components/assistant/assistant-provider";
 import { AppShell } from "@/components/crm/app-nav";
 import { CrmProvider } from "@/components/crm/crm-provider";
 import { NotificationsProvider } from "@/components/crm/notifications-provider";
@@ -22,10 +23,13 @@ export default function CrmLayout({ children }: LayoutProps<"/">) {
   return (
     <CrmProvider>
       <NotificationsProvider>
-        {/* Respaldo neutro (solo el fondo) para que no aparezca una barra que luego cambie */}
-        <Suspense fallback={<div className="h-dvh bg-background" />}>
-          <ShellWithPreference>{children}</ShellWithPreference>
-        </Suspense>
+        {/* Asistente del sistema: su chat temporal vive aquí para no perderse al navegar. */}
+        <AssistantProvider>
+          {/* Respaldo neutro (solo el fondo) para que no aparezca una barra que luego cambie */}
+          <Suspense fallback={<div className="h-dvh bg-background" />}>
+            <ShellWithPreference>{children}</ShellWithPreference>
+          </Suspense>
+        </AssistantProvider>
       </NotificationsProvider>
     </CrmProvider>
   );

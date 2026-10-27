@@ -1,5 +1,3 @@
-// Generado con `generate_typescript_types` de Supabase. No editar a mano:
-// regenerar si cambia el esquema.
 export type Json =
   | string
   | number
@@ -76,21 +74,27 @@ export type Database = {
           escalation_topics: string[]
           handoff_assign_to: string | null
           handoff_message: string
+          history_max_tokens: number
           history_window_messages: number
           input_price_per_mtok: number
           kill_switch: boolean
           max_consecutive_ceiling: number
           max_output_tokens: number
+          max_tool_calls: number
           max_wait_seconds: number
           model: string
           monthly_alert_threshold_pct: number
           monthly_token_cap: number
           output_price_per_mtok: number
+          per_person_daily_ceiling: number
           reasoning_effort: string
+          request_ttl_seconds: number
           safety_rules: string
           summary_max_chars: number
           system_prompt: string
           temperature: number | null
+          tool_min_roles: Json
+          tool_result_max_chars: number
           updated_at: string
           updated_by: string | null
         }
@@ -105,21 +109,27 @@ export type Database = {
           escalation_topics?: string[]
           handoff_assign_to?: string | null
           handoff_message?: string
+          history_max_tokens?: number
           history_window_messages?: number
           input_price_per_mtok?: number
           kill_switch?: boolean
           max_consecutive_ceiling?: number
           max_output_tokens?: number
+          max_tool_calls?: number
           max_wait_seconds?: number
           model?: string
           monthly_alert_threshold_pct?: number
           monthly_token_cap?: number
           output_price_per_mtok?: number
+          per_person_daily_ceiling?: number
           reasoning_effort?: string
+          request_ttl_seconds?: number
           safety_rules?: string
           summary_max_chars?: number
           system_prompt?: string
           temperature?: number | null
+          tool_min_roles?: Json
+          tool_result_max_chars?: number
           updated_at?: string
           updated_by?: string | null
         }
@@ -134,21 +144,27 @@ export type Database = {
           escalation_topics?: string[]
           handoff_assign_to?: string | null
           handoff_message?: string
+          history_max_tokens?: number
           history_window_messages?: number
           input_price_per_mtok?: number
           kill_switch?: boolean
           max_consecutive_ceiling?: number
           max_output_tokens?: number
+          max_tool_calls?: number
           max_wait_seconds?: number
           model?: string
           monthly_alert_threshold_pct?: number
           monthly_token_cap?: number
           output_price_per_mtok?: number
+          per_person_daily_ceiling?: number
           reasoning_effort?: string
+          request_ttl_seconds?: number
           safety_rules?: string
           summary_max_chars?: number
           system_prompt?: string
           temperature?: number | null
+          tool_min_roles?: Json
+          tool_result_max_chars?: number
           updated_at?: string
           updated_by?: string | null
         }
@@ -172,6 +188,99 @@ export type Database = {
             columns: ["updated_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_requests: {
+        Row: {
+          action: string
+          assistant_chat_id: string | null
+          confirmed_at: string | null
+          conversation_id: string
+          created_at: string
+          executed_at: string | null
+          expires_at: string
+          id: string
+          params: Json
+          requested_by: string
+          result: string | null
+          run_id: string | null
+          source_agent_id: string
+          status: string
+          target_agent_key: string
+          updated_at: string
+        }
+        Insert: {
+          action: string
+          assistant_chat_id?: string | null
+          confirmed_at?: string | null
+          conversation_id: string
+          created_at?: string
+          executed_at?: string | null
+          expires_at: string
+          id?: string
+          params?: Json
+          requested_by: string
+          result?: string | null
+          run_id?: string | null
+          source_agent_id: string
+          status?: string
+          target_agent_key: string
+          updated_at?: string
+        }
+        Update: {
+          action?: string
+          assistant_chat_id?: string | null
+          confirmed_at?: string | null
+          conversation_id?: string
+          created_at?: string
+          executed_at?: string | null
+          expires_at?: string
+          id?: string
+          params?: Json
+          requested_by?: string
+          result?: string | null
+          run_id?: string | null
+          source_agent_id?: string
+          status?: string
+          target_agent_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_requests_assistant_chat_id_fkey"
+            columns: ["assistant_chat_id"]
+            isOneToOne: false
+            referencedRelation: "assistant_chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_requests_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_requests_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_requests_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "agent_scheduled_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_requests_source_agent_id_fkey"
+            columns: ["source_agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
             referencedColumns: ["id"]
           },
         ]
@@ -511,6 +620,131 @@ export type Database = {
             columns: ["updated_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assistant_chats: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          min_role: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          min_role?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          min_role?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assistant_chats_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assistant_daily_usage: {
+        Row: {
+          day: string
+          questions: number
+          user_id: string
+        }
+        Insert: {
+          day: string
+          questions?: number
+          user_id: string
+        }
+        Update: {
+          day?: string
+          questions?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assistant_daily_usage_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assistant_messages: {
+        Row: {
+          author_id: string | null
+          chart: Json | null
+          chat_id: string
+          content: string
+          created_at: string
+          fetched_at: string | null
+          id: string
+          request_id: string | null
+          role: string
+          tool_data: Json | null
+          tool_name: string | null
+        }
+        Insert: {
+          author_id?: string | null
+          chart?: Json | null
+          chat_id: string
+          content?: string
+          created_at?: string
+          fetched_at?: string | null
+          id?: string
+          request_id?: string | null
+          role: string
+          tool_data?: Json | null
+          tool_name?: string | null
+        }
+        Update: {
+          author_id?: string | null
+          chart?: Json | null
+          chat_id?: string
+          content?: string
+          created_at?: string
+          fetched_at?: string | null
+          id?: string
+          request_id?: string | null
+          role?: string
+          tool_data?: Json | null
+          tool_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assistant_messages_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assistant_messages_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "assistant_chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assistant_messages_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "agent_requests"
             referencedColumns: ["id"]
           },
         ]
@@ -1909,6 +2143,34 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      assistant_consume_question: { Args: never; Returns: Json }
+      cancel_agent_request: {
+        Args: { p_id: string }
+        Returns: {
+          action: string
+          assistant_chat_id: string | null
+          confirmed_at: string | null
+          conversation_id: string
+          created_at: string
+          executed_at: string | null
+          expires_at: string
+          id: string
+          params: Json
+          requested_by: string
+          result: string | null
+          run_id: string | null
+          source_agent_id: string
+          status: string
+          target_agent_key: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "agent_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       cancel_notes_backfill: { Args: { p_agent_key: string }; Returns: number }
       claim_agent_runs: {
         Args: { p_limit?: number }
@@ -1943,6 +2205,33 @@ export type Database = {
           trade_name: string
         }[]
       }
+      confirm_agent_request: {
+        Args: { p_id: string }
+        Returns: {
+          action: string
+          assistant_chat_id: string | null
+          confirmed_at: string | null
+          conversation_id: string
+          created_at: string
+          executed_at: string | null
+          expires_at: string
+          id: string
+          params: Json
+          requested_by: string
+          result: string | null
+          run_id: string | null
+          source_agent_id: string
+          status: string
+          target_agent_key: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "agent_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       contacts_summary: {
         Args: never
         Returns: {
@@ -1951,6 +2240,38 @@ export type Database = {
           customers: number
           inactive_customers: number
         }[]
+      }
+      create_agent_request: {
+        Args: {
+          p_action: string
+          p_assistant_chat_id: string
+          p_conversation_id: string
+          p_params: Json
+        }
+        Returns: {
+          action: string
+          assistant_chat_id: string | null
+          confirmed_at: string | null
+          conversation_id: string
+          created_at: string
+          executed_at: string | null
+          expires_at: string
+          id: string
+          params: Json
+          requested_by: string
+          result: string | null
+          run_id: string | null
+          source_agent_id: string
+          status: string
+          target_agent_key: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "agent_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       create_company: {
         Args: {
@@ -2065,6 +2386,10 @@ export type Database = {
       }
       resolve_suggestion: {
         Args: { p_accept: boolean; p_id: string }
+        Returns: undefined
+      }
+      save_assistant_turn: {
+        Args: { p_chat_id: string; p_messages: Json; p_min_role: string }
         Returns: undefined
       }
       save_notes_pass: {

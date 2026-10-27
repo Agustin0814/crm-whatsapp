@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/generar-ayuda.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "iconos": "node scripts/generar-iconos.mjs"
+    "iconos": "node scripts/generar-iconos.mjs",
+    "ayuda": "node scripts/generar-ayuda.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

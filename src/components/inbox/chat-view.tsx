@@ -223,16 +223,19 @@ export function ChatView({
           </div>
         )}
         <MessageList messages={messages} contact={contact} loading={loadingMessages} now={now} />
-        <AgentSuggestionBanner conversationId={conversation.id} windowOpen={windowOpen} />
-        <Composer
-          ref={composerRef}
-          conversationId={conversation.id}
-          contact={contact}
-          windowOpen={windowOpen}
-          remainingMs={remaining}
-          hasInbound={conversation.last_inbound_at !== null}
-          onSent={onSent}
-        />
+        {/* data-assistant-avoid: la burbuja del Asistente del sistema se coloca por encima. */}
+        <div data-assistant-avoid className="shrink-0">
+          <AgentSuggestionBanner conversationId={conversation.id} windowOpen={windowOpen} />
+          <Composer
+            ref={composerRef}
+            conversationId={conversation.id}
+            contact={contact}
+            windowOpen={windowOpen}
+            remainingMs={remaining}
+            hasInbound={conversation.last_inbound_at !== null}
+            onSent={onSent}
+          />
+        </div>
       </div>
       <div className={cn("min-h-0 flex-1 flex-col", showNotes ? "flex" : "hidden")}>
         <NotesPanel conversationId={conversation.id} contactId={conversation.contact_id} />

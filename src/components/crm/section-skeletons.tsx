@@ -329,3 +329,30 @@ export function AgentsSkeleton() {
     </SkeletonScreen>
   );
 }
+
+// --- Asistente -------------------------------------------------------------------
+
+/** Lista de chats guardados a la izquierda y el chat a la derecha (mismas medidas que AssistantView). */
+export function AssistantSkeleton() {
+  return (
+    <SkeletonScreen>
+      <PageHeader title="Asistente" description="Los chats guardados son compartidos con tu equipo." actions={<Skeleton className="h-9 w-28 rounded-lg" />} />
+      <div className="flex min-h-0 flex-1">
+        <div className="w-full space-y-1 p-2 lg:w-(--lista-ancho) lg:border-r">
+          {["w-40", "w-52", "w-36", "w-48"].map((w, i) => (
+            <div key={i} className="space-y-1.5 rounded-xl px-3 py-2.5">
+              <Skeleton className={cn("h-4", w)} />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          ))}
+        </div>
+        <div className="hidden min-w-0 flex-1 flex-col lg:flex">
+          <div className="flex-1" />
+          <div className="border-t px-6 py-3">
+            <Skeleton className="h-11 w-full rounded-2xl" />
+          </div>
+        </div>
+      </div>
+    </SkeletonScreen>
+  );
+}

@@ -3,9 +3,10 @@
 import { BotIcon, BotOffIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { profileName, useCrm } from "@/components/crm/crm-provider";
 import { IconButton } from "@/components/ui/icon-button";
 import { fetchAgent, setAgentPaused } from "@/lib/agents/client";
-import { AGENT_KEYS, PAUSE_REASON_LABELS } from "@/lib/agents/config";
+import { AGENT_KEYS, pauseReasonLabel } from "@/lib/agents/config";
 import type { Conversation } from "@/lib/crm/types";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ type Props = {
  */
 export function AgentPauseToggle({ conversation, className }: Props) {
   const supabase = createClient();
+  const { profiles } = useCrm();
   const [enabled, setEnabled] = useState(false);
   const [optimistic, setOptimistic] = useState<{ id: string; paused: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,7 +47,7 @@ export function AgentPauseToggle({ conversation, className }: Props) {
     optimistic && optimistic.id === conversation.id && optimistic.paused !== conversation.agent_paused
       ? optimistic.paused
       : conversation.agent_paused;
-  const reason = conversation.agent_paused_reason ? PAUSE_REASON_LABELS[conversation.agent_paused_reason] : null;
+  const reason = pauseReasonLabel(conversation.agent_paused_reason, (id) => profileName(profiles.find((p) => p.id === id)));
 
   async function toggle() {
     const next = !paused;

@@ -6,6 +6,7 @@ import type { createClient } from "@/lib/supabase/client";
 import type { Json, Tables } from "@/lib/supabase/database.types";
 import { DEFAULT_LIMITS, type AgentConfig, type AgentLimits, type AgentMode } from "./config";
 import type { NotesAgentConfig } from "./notes-config";
+import type { SystemAgentConfig } from "./system-config";
 
 type Client = ReturnType<typeof createClient>;
 
@@ -78,7 +79,7 @@ export async function fetchAgentLimits(supabase: Client, key: string): Promise<A
 export async function saveAgentSettings(
   supabase: Client,
   key: string,
-  changes: { enabled?: boolean; mode?: AgentMode; config?: AgentConfig | NotesAgentConfig },
+  changes: { enabled?: boolean; mode?: AgentMode; config?: AgentConfig | NotesAgentConfig | SystemAgentConfig },
 ): Promise<Agent> {
   // null = «no cambiar» (la función usa coalesce); los tipos generados no lo reflejan.
   const { data, error } = await supabase.rpc("update_agent_settings", {

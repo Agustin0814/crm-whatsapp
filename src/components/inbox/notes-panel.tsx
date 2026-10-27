@@ -240,7 +240,7 @@ export function NotesPanel({ conversationId, contactId }: { conversationId: stri
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="border-t border-nota-borde bg-nota/50 p-3 md:px-6">
+      <form data-assistant-avoid onSubmit={handleSubmit} className="border-t border-nota-borde bg-nota/50 p-3 md:px-6">
         <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-nota-texto">
           <LockIcon className="size-3.5" /> Nota interna: solo la ve tu equipo, no se envía por WhatsApp.
         </p>
