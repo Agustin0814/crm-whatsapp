@@ -3,6 +3,7 @@ import { processDueRuns, scheduleAgentsForInbound } from "@/lib/agents/engine";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TablesInsert } from "@/lib/supabase/database.types";
 import { baseMime, isMediaKind, sanitizeFilename } from "@/lib/media/rules";
+import { parseLocation, parseReferral, parseSharedContacts, toJson } from "@/lib/crm/message-data";
 import { storeInboundMedia } from "./media";
 import type {
   WaChangeValue,
@@ -76,14 +77,30 @@ async function handleInboundMessage(
   const contactId = await upsertContact(supabase, message.from, profileName);
   const conversationId = await getOrCreateConversation(supabase, contactId);
 
+  // Anuncio de clic a WhatsApp: se guarda en el contacto y el origen pasa a
+  // «Anuncio» solo si estaba vacío (record_contact_referral). Nunca bloquea.
+  const referral = parseReferral(message.referral);
+  if (referral) {
+    const { error: referralError } = await supabase.rpc("record_contact_referral", {
+      p_contact_id: contactId,
+      p_referral: toJson(referral),
+    });
+    if (referralError) logError("anuncio", message.id, referralError);
+  }
+
   const media = isMediaKind(message.type) ? getMedia(message) : undefined;
   const mime = media?.mime_type ? baseMime(media.mime_type) : null;
+  const location = message.type === "location" ? parseLocation(message.location) : null;
+  const sharedContacts = message.type === "contacts" ? parseSharedContacts(message.contacts) : [];
   const row: TablesInsert<"messages"> = {
     conversation_id: conversationId,
     direction: "inbound",
     status: "received",
     type: message.type,
     body: getBody(message),
+    // Datos estructurados (la tarjeta del chat); body sigue siendo la descripción legible.
+    location: location ? toJson(location) : null,
+    shared_contacts: sharedContacts.length > 0 ? toJson(sharedContacts) : null,
     media_id: media?.id ?? null,
     media_mime: mime,
     // El nombre solo llega en documentos; se sanea y se ajusta al tipo real.

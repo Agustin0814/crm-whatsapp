@@ -299,7 +299,7 @@ export function AgentsView() {
 
           {/* Lista de agentes */}
           {agents.length === 0 ? (
-            <EmptyState icon={BotIcon} title="Aún no hay agentes" description="Cuando el proveedor active un agente, aparecerá aquí." />
+            <EmptyState icon={BotIcon} title="Aún no hay agentes" description="Cuando el superadmin active un agente, aparecerá aquí." />
           ) : (
             <section aria-label="Agentes">
               {/* ≥ 768 px: tabla */}
@@ -382,7 +382,7 @@ export function AgentsView() {
                 </TabsTrigger>
                 {isSuperadmin && (
                   <TabsTrigger value="locked" className="flex-none">
-                    Proveedor
+                    Superadmin
                     {dirty.locked && <UnsavedDot />}
                   </TabsTrigger>
                 )}
@@ -458,9 +458,9 @@ export function AgentsView() {
             <AlertDialogTitle>Tienes cambios sin guardar</AlertDialogTitle>
             <AlertDialogDescription>
               {dirty.config && dirty.locked
-                ? "Hay cambios sin guardar en «Configuración» y en «Proveedor»."
+                ? "Hay cambios sin guardar en «Configuración» y en «Superadmin»."
                 : dirty.locked
-                  ? "Hay cambios sin guardar en «Proveedor»."
+                  ? "Hay cambios sin guardar en «Superadmin»."
                   : "Hay cambios sin guardar en «Configuración»."}{" "}
               Cada pestaña se guarda con su propio botón «Guardar».
             </AlertDialogDescription>
@@ -535,7 +535,7 @@ function StatusControl({ agent, limits, canEdit, busy, onUpdate }: RowProps) {
         aria-label={`Activar o desactivar ${agent.name}`}
       />
       {stopped ? (
-        <span className="rounded-full bg-error-suave px-2 py-0.5 text-xs text-error-texto">Detenido por el proveedor</span>
+        <span className="rounded-full bg-error-suave px-2 py-0.5 text-xs text-error-texto">Detenido por el superadmin</span>
       ) : (
         <span className={agent.enabled ? "text-exito-texto" : "text-texto-suave"}>{agent.enabled ? "Activo" : "Inactivo"}</span>
       )}

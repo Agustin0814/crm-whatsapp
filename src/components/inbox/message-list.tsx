@@ -10,6 +10,8 @@ import { EVENT_LABELS, type ContactWithTags, type ConversationEvent, type Messag
 import { dayKey, formatDayLabel, formatTime } from "@/lib/format";
 import { isMediaKind } from "@/lib/media/rules";
 import { cn } from "@/lib/utils";
+import { parseLocation, parseSharedContacts } from "@/lib/crm/message-data";
+import { LocationCard, SharedContactsCard } from "./message-cards";
 import { MediaMessage } from "./media/media-message";
 import { MessageStatus } from "./message-status";
 import { useAgentNames } from "./use-agent-names";
@@ -31,6 +33,8 @@ type Props = {
   now: number | null;
   /** Historial de etapas: líneas discretas de sistema entre los mensajes. */
   events?: ConversationEvent[];
+  /** Se llama cuando una tarjeta cambia el contacto (p. ej. «Usar como ubicación de entrega»). */
+  onContactChanged?: () => void;
 };
 
 type TimelineItem = { kind: "message"; time: string; message: Message } | { kind: "event"; time: string; event: ConversationEvent };
@@ -47,7 +51,7 @@ function buildTimeline(messages: Message[], events: ConversationEvent[]): Timeli
  * Mensajes agrupados por día. Los consecutivos del mismo remitente se agrupan
  * y el avatar del contacto solo aparece en el primero del grupo.
  */
-export function MessageList({ messages, contact, loading, now, events = [] }: Props) {
+export function MessageList({ messages, contact, loading, now, events = [], onContactChanged }: Props) {
   const agentName = useAgentNames();
   const { profiles } = useCrm();
   const timeline = buildTimeline(messages, events);
@@ -122,6 +126,7 @@ export function MessageList({ messages, contact, loading, now, events = [] }: Pr
                     firstOfGroup={firstOfGroup}
                     contact={contact}
                     agentName={item.message.sent_by_agent ? agentName(item.message.agent_id) : null}
+                    onContactChanged={onContactChanged}
                   />
                 )}
               </Fragment>
@@ -152,6 +157,7 @@ function MessageBubble({
   firstOfGroup,
   contact,
   agentName,
+  onContactChanged,
 }: {
   message: Message;
   time: string;
@@ -159,11 +165,17 @@ function MessageBubble({
   contact: ContactWithTags | null;
   /** Nombre del asistente si el mensaje lo envió un agente. */
   agentName: string | null;
+  onContactChanged?: () => void;
 }) {
   const outbound = message.direction === "outbound";
   const media = isMediaKind(message.type);
   const sticker = message.type === "sticker";
-  const unsupported = !media && message.type !== "text";
+  // Ubicación y contactos compartidos se muestran como tarjeta si traen datos
+  // válidos; si no (mensajes viejos o datos rotos), se quedan como no compatibles.
+  const location = message.type === "location" ? parseLocation(message.location) : null;
+  const sharedContacts = message.type === "contacts" ? parseSharedContacts(message.shared_contacts) : [];
+  const card = location !== null || sharedContacts.length > 0;
+  const unsupported = !media && !card && message.type !== "text";
 
   const meta = (
     <div
@@ -227,8 +239,10 @@ function MessageBubble({
                 Mensaje no compatible ({UNSUPPORTED_LABELS[message.type] ?? message.type})
               </p>
             )}
-            {/* Texto, leyenda o descripción del tipo no compatible */}
-            {message.body && (
+            {location && <LocationCard messageId={message.id} location={location} onContactChanged={onContactChanged} />}
+            {sharedContacts.length > 0 && <SharedContactsCard contacts={sharedContacts} />}
+            {/* Texto, leyenda o descripción del tipo no compatible (las tarjetas ya lo muestran) */}
+            {message.body && !card && (
               <p className={cn("break-words whitespace-pre-wrap", media && "px-2 pt-1.5")}>{message.body}</p>
             )}
             <div className={cn(media && "px-2 pb-0.5")}>{meta}</div>

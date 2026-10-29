@@ -19,7 +19,9 @@ Cada cambio queda como una línea discreta en el chat, por ejemplo «Pasó a Rep
 Con el sonido de siempre y un aviso en pantalla (con **Abrir**): los vendedores, cuando un chat entra a Ventas; los repartidores, cuando entra uno a Reparto. Nunca te avisa de lo que hiciste tú.
 
 ## Bandeja del repartidor
-El repartidor ve una sola lista con sus chats en Reparto, primero los que llevan más tiempo esperando. En el chat tiene el botón **Llamar** con el teléfono del cliente; si la ventana de 24 horas está cerrada, el teléfono se muestra destacado. La ficha del contacto es de solo lectura.
+El repartidor ve una sola lista con sus chats en Reparto, primero los que llevan más tiempo esperando. En el chat tiene el botón **Llamar** con el teléfono del cliente; si la ventana de 24 horas está cerrada, el teléfono se muestra destacado. La ficha del contacto es de solo lectura y muestra la dirección de entrega, las referencias y **Abrir en Maps**.
+
+Al **Pasar a Reparto**, la ventana de confirmación muestra también la dirección y las referencias de la ficha.
 
 ## Buscar y filtrar
 - El buscador encuentra por nombre, teléfono o texto de los mensajes.
@@ -33,6 +35,7 @@ El repartidor ve una sola lista con sus chats en Reparto, primero los que llevan
 - Escribe **/** para abrir las respuestas rápidas (solo aparecen las de tu rol).
 - En **Más acciones** puedes **Fijar arriba**, **Marcar como no leída**, cambiar el estado (Abierta, Pendiente, Resuelta, Archivada) y **Asignar a** alguien del equipo. El repartidor no tiene este menú.
 - El botón de notas cambia la vista a las notas internas del chat (ver «Notas internas»).
+- Si el cliente manda su **ubicación**, se ve como tarjeta con **Abrir en Maps** y, para vendedores y administradores, **Usar como ubicación de entrega**. Un **contacto compartido** se ve con su nombre, teléfono y **Crear contacto** (ver «Contactos y ficha del cliente»).
 - Si abres un enlace a un chat que no te corresponde, verás «No tienes acceso a este chat».
 
 ## Ventana de 24 horas

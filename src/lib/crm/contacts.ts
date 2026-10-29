@@ -14,9 +14,12 @@ export async function updateContact(
 ): Promise<ContactWithTags> {
   // wa_id nunca se edita desde la interfaz (lo controla el webhook) y el
   // teléfono solo se cambia con verificación de duplicados (rpc update_phone).
-  const { wa_id: _waId, phone: _phone, ...safePatch } = patch;
+  // El anuncio de origen solo lo guarda el webhook.
+  const { wa_id: _waId, phone: _phone, ad_referral: _ref, ad_referral_at: _refAt, ...safePatch } = patch;
   void _waId;
   void _phone;
+  void _ref;
+  void _refAt;
   const { data, error } = await supabase
     .from("contacts")
     .update(safePatch)

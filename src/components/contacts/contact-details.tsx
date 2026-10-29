@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import { ClassificationControl } from "./classification-control";
 import { CompanyLinks } from "./company-links";
 import { CustomFieldsEditor } from "./custom-fields-editor";
+import { DeliverySection } from "./delivery-section";
 import { EditableField } from "./editable-field";
 import { PhoneField } from "./phone-field";
 import { PurchaseCounter } from "./purchase-counter";
@@ -148,6 +149,10 @@ export function ContactDetails({ contact, onContactChange, actions, hasConversat
             validate={(v) => (EMAIL_RE.test(v) ? null : "Correo no válido")}
           />
         </div>
+      </Section>
+
+      <Section title="Entrega" id="entrega-contacto">
+        <DeliverySection contact={contact} onSave={save} onContactChange={onContactChange} />
       </Section>
 
       <Section title="Empresas y funciones">

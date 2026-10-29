@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, SearchXIcon } from "lucide-react";
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SearchXIcon, UploadIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -21,6 +21,7 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -30,7 +31,9 @@ import { formatDate, formatPhone, formatRelative } from "@/lib/format";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { CONTACTS_CHANGED_EVENT } from "@/lib/crm/purchases";
+import { CONTACT_SOURCES, SOURCE_LABELS } from "@/lib/crm/message-data";
 import { EntityPanel, type PanelTarget } from "./entity-panel";
+import { ImportDialog } from "./import-dialog";
 import { NewEntryDialog, type NewEntryPreset } from "./new-entry-dialog";
 import { SummaryCards } from "./summary-cards";
 
@@ -51,6 +54,7 @@ const TABS = [
   { value: "empresas", label: "Empresas", kind: "company", classification: null },
 ] as const;
 type Activity = "all" | "active" | "inactive";
+const ALL_SOURCES = "__todos__";
 
 /** «persona.<uuid>» / «empresa.<uuid>» (parámetro ?ficha=) → ficha a abrir en el panel. */
 function parseFicha(value: string | null, editar: boolean): PanelTarget | null {
@@ -68,7 +72,7 @@ export function ContactsView() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { tags, roles } = useCrm();
+  const { tags, roles, isAdmin } = useCrm();
 
   const requestedTab = searchParams.get("tab");
   // La ficha abierta vive en la URL (?ficha=): se puede enlazar y no cambia de página.
@@ -79,6 +83,9 @@ export function ContactsView() {
   const [search, setSearch] = useState("");
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [roleIds, setRoleIds] = useState<string[]>([]);
+  const [source, setSource] = useState<string>(ALL_SOURCES);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<DirectoryRow[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -125,6 +132,7 @@ export function ContactsView() {
         p_activity: effectiveActivity,
         p_tag_ids: tagIds.length ? tagIds : undefined,
         p_role_ids: roleIds.length ? roleIds : undefined,
+        p_source: source === ALL_SOURCES ? undefined : source,
         // Se pide una fila extra para saber si hay página siguiente.
         p_limit: PAGE_SIZE + 1,
         p_offset: page * PAGE_SIZE,
@@ -142,7 +150,7 @@ export function ContactsView() {
         setLoading(false);
         setLoadCount((n) => n + 1);
       });
-  }, [supabase, search, tab.kind, tab.classification, effectiveActivity, tagIds, roleIds, page, reloadKey]);
+  }, [supabase, search, tab.kind, tab.classification, effectiveActivity, tagIds, roleIds, source, page, reloadKey]);
 
   // Cambios hechos en otro lugar (compras, reclasificación) refrescan la lista.
   useEffect(() => {
@@ -176,7 +184,34 @@ export function ContactsView() {
     apply();
   }
 
-  const filtered = search !== "" || tagIds.length > 0 || roleIds.length > 0 || effectiveActivity !== "all";
+  const filtered =
+    search !== "" || tagIds.length > 0 || roleIds.length > 0 || source !== ALL_SOURCES || effectiveActivity !== "all";
+
+  /** CSV de personas (solo administración; el servidor lo vuelve a validar y deja registro). */
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const response = await fetch("/api/contacts/export", { cache: "no-store" });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        toast.error(data.error ?? "No se pudo exportar");
+        return;
+      }
+      const blob = await response.blob();
+      const name = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? "contactos.csv";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Contactos exportados");
+    } catch {
+      toast.error("No hay conexión con el servidor");
+    } finally {
+      setExporting(false);
+    }
+  }
   const tagById = new Map(tags.map((t) => [t.id, t]));
   const roleById = new Map(roles.map((r) => [r.id, r]));
 
@@ -248,6 +283,23 @@ export function ContactsView() {
           value={roleIds}
           onChange={(v) => changeFilter(() => setRoleIds(v))}
         />
+        <Select value={source} onValueChange={(v) => changeFilter(() => setSource(v))}>
+          <SelectTrigger
+            size="sm"
+            className={cn("w-auto min-w-36", source !== ALL_SOURCES && "border-marca text-marca-texto")}
+            aria-label="Origen del contacto"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent position="popper">
+            <SelectItem value={ALL_SOURCES}>Cualquier origen</SelectItem>
+            {CONTACT_SOURCES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {SOURCE_LABELS[s]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {filtered && (
           <Button
             variant="ghost"
@@ -258,6 +310,7 @@ export function ContactsView() {
                 setSearch("");
                 setTagIds([]);
                 setRoleIds([]);
+                setSource(ALL_SOURCES);
                 setActivity("all");
               })
             }
@@ -265,9 +318,20 @@ export function ContactsView() {
             Limpiar
           </Button>
         )}
+        {/* Importar y exportar: solo administración (las rutas lo vuelven a validar) */}
+        {isAdmin && (
+          <div className="ml-auto flex gap-2">
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <UploadIcon aria-hidden /> Importar
+            </Button>
+            <Button variant="outline" disabled={exporting} onClick={() => void exportCsv()}>
+              <DownloadIcon aria-hidden /> Exportar
+            </Button>
+          </div>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button className="ml-auto">
+            <Button className={cn(!isAdmin && "ml-auto")}>
               <Icon name="agregar" /> Nuevo
             </Button>
           </DropdownMenuTrigger>
@@ -309,13 +373,14 @@ export function ContactsView() {
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
                 <TableHead>Nombre</TableHead>
+                <TableHead className="hidden md:table-cell">Teléfono</TableHead>
                 <TableHead className="hidden xl:table-cell">Tipo</TableHead>
                 <TableHead className="hidden lg:table-cell">Empresa / contactos</TableHead>
                 <TableHead>Clasificación</TableHead>
                 <TableHead className="hidden sm:table-cell">Compras</TableHead>
                 <TableHead className="hidden md:table-cell">Etiquetas</TableHead>
                 <TableHead className="hidden xl:table-cell">Funciones</TableHead>
-                <TableHead className="hidden sm:table-cell">Última interacción</TableHead>
+                <TableHead className="hidden sm:table-cell">Escribió</TableHead>
                 <TableHead className="w-12">
                   <span className="sr-only">Acciones</span>
                 </TableHead>
@@ -354,13 +419,20 @@ export function ContactsView() {
                             />
                             <div className="min-w-0">
                               <p className="max-w-56 truncate font-medium">{row.display_name}</p>
-                              <p className="text-xs text-muted-foreground tabular-nums">
+                              <p className="text-xs text-muted-foreground tabular-nums md:hidden">
                                 {isCompany
                                   ? (row.phone ? formatPhone(row.phone) : row.email || "Empresa")
                                   : formatPhone(row.wa_id ?? row.phone)}
                               </p>
                             </div>
                           </button>
+                        </TableCell>
+                        <TableCell className="hidden whitespace-nowrap text-muted-foreground tabular-nums md:table-cell">
+                          {isCompany
+                            ? (row.phone ? formatPhone(row.phone) : "—")
+                            : row.wa_id || row.phone
+                              ? formatPhone(row.wa_id ?? row.phone)
+                              : "—"}
                         </TableCell>
                         <TableCell className="hidden text-muted-foreground xl:table-cell">
                           {isCompany ? "Empresa" : "Persona"}
@@ -387,7 +459,7 @@ export function ContactsView() {
                         </TableCell>
                         <TableCell className="hidden sm:table-cell">
                           <p className="tabular-nums">{row.purchase_count ? row.purchase_count : "—"}</p>
-                          {row.classification === "customer" && row.last_purchase_at && (
+                          {row.last_purchase_at && (
                             <p className="text-xs text-texto-suave">Última: {formatDate(row.last_purchase_at)}</p>
                           )}
                         </TableCell>
@@ -409,7 +481,8 @@ export function ContactsView() {
                           </div>
                         </TableCell>
                         <TableCell className="hidden text-muted-foreground sm:table-cell">
-                          {now === null ? " " : formatRelative(row.last_interaction, now)}
+                          {/* Último mensaje DEL CLIENTE (no cuenta lo que le escribimos) */}
+                          {now === null ? " " : row.last_inbound_at ? formatRelative(row.last_inbound_at, now) : "Nunca"}
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <DropdownMenu>
@@ -458,6 +531,9 @@ export function ContactsView() {
         </footer>
       )}
 
+      {isAdmin && (
+        <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={() => setReloadKey((k) => k + 1)} />
+      )}
       <NewEntryDialog preset={preset} onClose={() => setPreset(null)} onCreated={(kind, id) => openPanel({ kind, id })} />
       <EntityPanel target={panel} onClose={() => openPanel(null)} />
     </div>
@@ -521,6 +597,7 @@ function SkeletonRow() {
           </div>
         </div>
       </TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
       <TableCell className="hidden xl:table-cell"><Skeleton className="h-4 w-14" /></TableCell>
       <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
       <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>

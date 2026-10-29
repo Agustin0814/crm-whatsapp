@@ -79,7 +79,7 @@ const FIELD_LABELS: Partial<Record<keyof Values, string>> = {
 const ROLE_OPTIONS: { value: AssistantRole; label: string }[] = [
   { value: "vendedor", label: "Vendedor" },
   { value: "admin", label: "Administrador" },
-  { value: "superadmin", label: "Proveedor" },
+  { value: "superadmin", label: "Superadmin" },
 ];
 
 function roleOverrides(value: unknown): Record<string, AssistantRole> {
@@ -139,7 +139,7 @@ export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChan
         setTopicsText(row.escalation_topics.join(", "));
       })
       .catch((error) => {
-        if (!cancelled) setLoadError(errorMessage(error, "No se pudo cargar la capa del proveedor"));
+        if (!cancelled) setLoadError(errorMessage(error, "No se pudo cargar la capa del superadmin"));
       });
     return () => {
       cancelled = true;
@@ -186,10 +186,10 @@ export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChan
         setSaveError(message);
         toast.error(message);
       } else {
-        toast.success("Capa del proveedor guardada");
+        toast.success("Capa del superadmin guardada");
       }
     } catch (error) {
-      const message = errorMessage(error, "No se pudo guardar la capa del proveedor");
+      const message = errorMessage(error, "No se pudo guardar la capa del superadmin");
       setSaveError(message);
       toast.error(message);
     } finally {
@@ -527,7 +527,7 @@ export function LockedConfigForm({ agentId, kind, agentKey, onSaved, onDirtyChan
             {dirty ? "Cambios sin guardar" : "Todo guardado"}
           </span>
           <Button onClick={() => void save()} disabled={saving || !dirty}>
-            {saving ? "Guardando…" : "Guardar capa del proveedor"}
+            {saving ? "Guardando…" : "Guardar capa del superadmin"}
           </Button>
         </div>
       </div>

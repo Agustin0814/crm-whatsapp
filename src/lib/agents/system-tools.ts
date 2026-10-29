@@ -200,7 +200,7 @@ async function agentsStatus(ctx: ToolContext): Promise<ToolOutput> {
   return {
     data: {
       asistentes: (agents ?? []).map((a) => {
-        const estado = stopped.has(a.id) ? "Detenido por el proveedor" : a.enabled ? "Activo" : "Inactivo";
+        const estado = stopped.has(a.id) ? "Detenido por el superadmin" : a.enabled ? "Activo" : "Inactivo";
         if (a.kind === "notes") {
           const c = parseNotesConfig(a.config);
           return {

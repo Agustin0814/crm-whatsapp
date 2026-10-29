@@ -1,13 +1,13 @@
 ---
 titulo: Usuarios y roles
-temas: usuarios, roles, vendedor, repartidor, administrador, proveedor, permisos, invitar usuario, invitación, desactivar, reactivar, puesto, mi perfil, avatar, contraseña, olvidé mi contraseña, recuperar contraseña, código, código de 6 dígitos, activar cuenta
+temas: usuarios, roles, vendedor, repartidor, administrador, superadmin, permisos, invitar usuario, invitación, desactivar, reactivar, puesto, mi perfil, avatar, contraseña, olvidé mi contraseña, recuperar contraseña, código, código de 6 dígitos, activar cuenta
 ---
 Hay cuatro roles:
 
 - **Vendedor:** ve todos los chats y contactos, toma chats, los pasa a Reparto, escribe notas y usa las respuestas rápidas para vendedores. Si el administrador lo permite, también usa el Asistente.
 - **Repartidor:** solo ve los chats que están en **Reparto** (y, si un vendedor eligió a un repartidor en concreto, solo ese repartidor). Ve el historial, las notas, el resumen del cliente y su teléfono. Puede marcar **Entregado** o **Devolver a Ventas**. No ve la lista de contactos, ni agentes, ni estadísticas, ni usuarios.
 - **Administrador:** todo lo anterior y además usuarios, agentes, estadísticas y la configuración general (etiquetas, respuestas rápidas, funciones, contactos y ventas).
-- **Proveedor:** quien da soporte técnico al sistema. No aparece en la lista de usuarios.
+- **Superadmin:** quien da soporte técnico al sistema. No aparece en la lista de usuarios.
 
 ## Administrar usuarios
 En Configuración → **Usuarios** (solo administradores):

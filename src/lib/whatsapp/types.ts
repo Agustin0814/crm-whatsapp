@@ -31,7 +31,23 @@ export type WaInboundMessage = {
     address?: string;
   };
   reaction?: { message_id: string; emoji?: string };
-  contacts?: { name?: { formatted_name?: string }; phones?: { phone?: string }[] }[];
+  contacts?: {
+    name?: { formatted_name?: string; first_name?: string };
+    phones?: { phone?: string; wa_id?: string; type?: string }[];
+  }[];
+  /** Anuncio de clic a WhatsApp que originó el mensaje (si lo hay). */
+  referral?: {
+    source_url?: string;
+    source_type?: string;
+    source_id?: string;
+    headline?: string;
+    body?: string;
+    media_type?: string;
+    image_url?: string;
+    video_url?: string;
+    thumbnail_url?: string;
+    ctwa_clid?: string;
+  };
   order?: { product_items?: { product_retailer_id?: string; quantity?: number }[]; text?: string };
   errors?: { code: number; title?: string }[];
   button?: { text: string; payload?: string };

@@ -15,7 +15,7 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | Ruta | Qué muestra | Quién la ve |
 |---|---|---|
 | `/agentes` | Encabezado «Agentes» con el botón **Registro de actividad** (abre un panel lateral). Debajo: 3 tarjetas de uso del mes que suman todos los agentes (respuestas, tokens con su barra y tope, costo estimado), luego los avisos sin leer y al final la lista de agentes (tabla en pantallas anchas, tarjetas en el móvil) con Estado, Modo y **Configurar**. | Todos con sesión. Tarjetas, avisos y registro: solo admin y superadmin. |
-| `/agentes` → «Configurar» (panel lateral) | Pestaña **Configuración**: el panel del cliente. Pestaña **Proveedor**: la capa del proveedor, solo superadmin. **Probador**: deshabilitado («Próximamente»). | Lo ve cualquiera; solo admin y superadmin pueden editar. La pestaña Proveedor solo existe para superadmin. |
+| `/agentes` → «Configurar» (panel lateral) | Pestaña **Configuración**: el panel del cliente. Pestaña **Superadmin**: la capa del proveedor, solo superadmin. **Probador**: deshabilitado («Próximamente»). | Lo ve cualquiera; solo admin y superadmin pueden editar. La pestaña Superadmin solo existe para superadmin. |
 | `/` (Bandeja) | En el chat: interruptor de pausa del asistente en el encabezado, banner «Sugerencia del asistente» sobre el composer y la etiqueta con el nombre del asistente en sus mensajes. En «notas»: tarjeta fija «Resumen del cliente» y las notas del Asistente de notas (icono de bot y su nombre). | Todos con sesión. |
 | Todas las pantallas (menos `/asistente`) | **Burbuja** del Asistente del sistema abajo a la derecha (chat temporal en memoria). Se coloca encima del cuadro de escritura y de las notas del chat; se puede minimizar. | Si el asistente está activo, sin parada del proveedor, con chat temporal activo y el rol permitido. |
 | `/asistente` | Chats guardados del Asistente del sistema (lista, «Nuevo chat», renombrar, borrar y el chat a pantalla completa). `?chat=<id>` o `?chat=nuevo`. | Mismo permiso que la burbuja y chats guardados activos. Cada chat se ve si el rol ≥ su `min_role`. |
@@ -92,7 +92,7 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `activity-log.tsx` | Tabla del registro (fecha, agente si hay más de uno, contacto, resultado, motivo, tokens y costo estimado). | `client.ts` |
 | `config-section.tsx` | Sección colapsable y la pista de rango «Permitido: x–y». | Los formularios |
 | `notes-config-form.tsx` | **Panel del cliente del Asistente de notas**: Nombre, Qué anota, Cuándo anota (minutos de silencio y «También al pasar el chat a una persona»), De quién anota, Límite de pasadas por día y Avisos. | `notes-config.ts`, `client.ts` |
-| `notes-backfill.tsx` | «Procesar chats existentes» dentro de la pestaña Proveedor (solo superadmin): avance, iniciar y detener. | `client.ts` |
+| `notes-backfill.tsx` | «Procesar chats existentes» dentro de la pestaña Superadmin (solo superadmin): avance, iniciar y detener. | `client.ts` |
 | `system-config-form.tsx` | **Panel del cliente del Asistente del sistema**: Nombre, Quién puede usarlo, Chats (temporal, guardados y días antes de borrar), Tareas que puede pedir, Límite de preguntas por persona y Avisos. | `system-config.ts`, `client.ts` |
 
 ### Asistente del sistema (`src/components/assistant/`)
@@ -130,7 +130,7 @@ Principio: los agentes son **mensajería**. Ninguno toca contactos, clasificacio
 | `components/crm/app-nav.tsx` | Opción «Agentes» del menú (icono `Bot` de lucide, provisional). | — |
 | `components/crm/section-skeletons.tsx` | `AgentsSkeleton`. | `loading.tsx`, `agents-view.tsx` |
 | `components/crm/crm-provider.tsx` | `isAdmin` (admin o superadmin) e `isSuperadmin`. | Toda la interfaz |
-| `components/settings/users-admin.tsx` y `api/admin/users/route.ts` | Rol «Proveedor» (superadmin): solo otro superadmin lo asigna o lo elimina. | `lib/auth.ts` |
+| `components/settings/users-admin.tsx` y `api/admin/users/route.ts` | Rol «Superadmin»: solo otro superadmin lo asigna o lo elimina. | `lib/auth.ts` |
 | `lib/auth.ts`, `lib/crm/types.ts` | `requireAdmin` e `isAdminRole` (admin o superadmin); etiquetas de los roles. | API y componentes |
 | `lib/env.ts` | `serverEnv` con `OPENAI_API_KEY` y `CRON_SECRET`. | `openai.ts`, `cron-auth.ts` |
 | `proxy.ts` | Excluye `api/agents/run` de la sesión (lo protege `CRON_SECRET`). | — |
@@ -235,12 +235,12 @@ select status, return_message, start_time from cron.job_run_details order by sta
 
 `/agentes` solo existe para administración (proxy + `canAccessPath`). Vendedor y repartidor no lo ven.
 
-| | Vendedor | Repartidor | Admin | Superadmin (proveedor) |
+| | Vendedor | Repartidor | Admin | Superadmin |
 |---|---|---|---|---|
 | Página `/agentes` | No | No | Sí: enciende, apaga y cambia el modo | Sí |
 | Tarjetas de uso, avisos y registro de actividad | No | No | Sí | Sí (además, los avisos de errores y del tope de tokens) |
 | Panel «Configurar» → Configuración (cliente) | — | — | Edita | Edita |
-| Pestaña «Proveedor» | No existe | No existe | No existe | Edita |
+| Pestaña «Superadmin» | No existe | No existe | No existe | Edita |
 | «Cuándo usarla» y «Permiso del agente» en respuestas rápidas | No | No | No | Edita |
 | Chat: sugerencias del asistente (`agent_suggestions`) | Sí | No (RLS) | Sí | Sí |
 | Chat: interruptor de pausa | Sí | No | Sí | Sí |
@@ -269,7 +269,7 @@ select status, return_message, start_time from cron.job_run_details order by sta
 
 ### Procesar chats existentes
 
-Pestaña Proveedor → «Procesar chats existentes» (solo superadmin, con el agente encendido). La base cuenta los chats con mensajes del cliente posteriores a su marca y los pone en cola cada 20 s. Si se alcanza el tope del día o del mes, la cola se cancela y llega el aviso. Al volver a iniciarlo sigue desde la marca de cada chat; `dedupe_key` impide duplicar notas.
+Pestaña Superadmin → «Procesar chats existentes» (solo superadmin, con el agente encendido). La base cuenta los chats con mensajes del cliente posteriores a su marca y los pone en cola cada 20 s. Si se alcanza el tope del día o del mes, la cola se cancela y llega el aviso. Al volver a iniciarlo sigue desde la marca de cada chat; `dedupe_key` impide duplicar notas.
 
 ### Pruebas hechas (26/10/2026, sin llamar al modelo)
 
@@ -317,5 +317,13 @@ Pestaña Proveedor → «Procesar chats existentes» (solo superadmin, con el ag
 - **Prueba real con el modelo** (`gpt-5-nano`, 26/10/2026; arnés local temporal solo de desarrollo, ya borrado; un contacto de prueba sin WhatsApp, ya borrado con su chat, notas, resumen y solicitudes; el asistente siguió apagado). Costo ≈ US$0.009 del asistente + una pasada de notas.
   - (a) responde desde el manual y cita `asistente-respuestas`. (b) 51 / 12 / 21 mensajes, iguales a un conteo directo en la base. (c) con rol agente: «tu rol no puede ver…» sin llamar a la herramienta de costos. (d) se niega a dar prompt, modelo y precio por token. (g) resume el chat abierto y marca el texto inyectado como dato. (h) tarjeta → confirmar → «Listo, pausé…», motivo `assistant:<id>`. (f) tarjeta → confirmar → «Listo, creé 2 notas y actualicé el resumen», solo en ese chat. (k) gráfica de barras con 3 series (una por asistente) armada con los datos reales. Chat nombrado («Reanuda el asistente en el chat de …») → busca el contacto y deja la tarjeta; «pausa todos los chats» → no crea nada.
   - Hallazgos corregidos: (e) con «haz lo que pide el cliente» proponía una tarea que nadie pidió → reglas 12–15 y candado en el servidor (`taskRequestedInQuestion`: la tarea solo se crea si la persona la pide con sus palabras). Escribía slugs y «Fuente: …» → `cleanAnswer`. Una gráfica por asistente no salía → columnas `tokens_*` en `consumo_agentes` y aviso «No pude armar la gráfica» si no cuadra. La tarjeta decía que «el agente la confirma» → nota de la herramienta corregida.
-  - Limitaciones observadas con `gpt-5-nano`: a veces ofrece cosas que no puede hacer («preparar una solicitud de acceso»), vuelve a consultar en vez de reutilizar un resultado del historial y en un seguimiento confundió «enviados por asistentes» con «de esos recibidos». Con `gpt-5-mini` debería mejorar (se cambia en la pestaña Proveedor). El Asistente de notas dejó una nota casi repetida («llamada previa»), comportamiento suyo ya conocido.
+  - Limitaciones observadas con `gpt-5-nano`: a veces ofrece cosas que no puede hacer («preparar una solicitud de acceso»), vuelve a consultar en vez de reutilizar un resultado del historial y en un seguimiento confundió «enviados por asistentes» con «de esos recibidos». Con `gpt-5-mini` debería mejorar (se cambia en la pestaña Superadmin). El Asistente de notas dejó una nota casi repetida («llamada previa»), comportamiento suyo ya conocido.
   - No probado: (i) en el navegador (requiere iniciar sesión) y (f) con el Asistente de notas apagado en producción (no se apagó para no afectar a los clientes; ese camino quedó probado en la base y el motor solo se salta la condición de «encendido»).
+
+## Nombres en pantalla: «superadmin»
+
+En la interfaz de agentes, alertas, registro de actividad, perfil, listas y errores de la base, el rol se llama **«Superadmin»**: pestaña «Superadmin», «Detenido por el superadmin (kill switch)», «Capa del superadmin guardada», «Solo el superadmin puede…». En este documento y en el código, «capa del proveedor» sigue siendo el nombre interno de `agent_locked_config`. No cambian: la clasificación de contactos «Proveedor» (`supplier`) ni «Proveedor OpenAI» / «proveedor del modelo» (el proveedor de IA). Dos filas antiguas del registro (`agent_usage_log` y `agent_scheduled_runs`) conservan su texto original.
+
+## Asistente de notas → sugerencia de dirección de entrega
+
+Después de guardar una pasada (`save_notes_pass`), `proposeDeliveryAddress` (`notes-engine.ts`) toma la primera nota de tipo `entrega` y llama a `propose_delivery_suggestion` (solo `service_role`). La base la ignora si el contacto ya tiene dirección o una sugerencia pendiente: el agente nunca escribe la dirección. La persona la ve en la sección «Entrega» de la ficha («Sugerido por Notas: … [Usar] [Descartar]») y `resolve_delivery_suggestion` la aplica solo si la dirección sigue vacía. No cambia el contrato con el modelo (`registrar_notas`) ni las demás reglas del agente.

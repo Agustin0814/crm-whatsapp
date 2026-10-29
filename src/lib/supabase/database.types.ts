@@ -1021,6 +1021,143 @@ export type Database = {
           },
         ]
       }
+      contact_delivery_suggestions: {
+        Row: {
+          contact_id: string
+          created_at: string
+          id: string
+          note_id: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          status: string
+          text: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          id?: string
+          note_id?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+          text: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          id?: string
+          note_id?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_delivery_suggestions_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_delivery_suggestions_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_delivery_suggestions_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_exports: {
+        Row: {
+          created_at: string
+          filters: Json
+          id: string
+          row_count: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          filters?: Json
+          id?: string
+          row_count: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          filters?: Json
+          id?: string
+          row_count?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_exports_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_imports: {
+        Row: {
+          created: number
+          created_at: string
+          default_classification: string
+          errors: number
+          filename: string | null
+          id: string
+          mode: string
+          skipped: number
+          total: number
+          updated: number
+          user_id: string
+        }
+        Insert: {
+          created?: number
+          created_at?: string
+          default_classification: string
+          errors?: number
+          filename?: string | null
+          id?: string
+          mode: string
+          skipped?: number
+          total?: number
+          updated?: number
+          user_id: string
+        }
+        Update: {
+          created?: number
+          created_at?: string
+          default_classification?: string
+          errors?: number
+          filename?: string | null
+          id?: string
+          mode?: string
+          skipped?: number
+          total?: number
+          updated?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_imports_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_roles: {
         Row: {
           created_at: string
@@ -1148,12 +1285,18 @@ export type Database = {
       }
       contacts: {
         Row: {
+          ad_referral: Json | null
+          ad_referral_at: string | null
           classification: string
           classification_source: string
           classified_at: string | null
           company: string | null
           created_at: string
           custom_fields: Json
+          delivery_address: string | null
+          delivery_lat: number | null
+          delivery_lng: number | null
+          delivery_references: string | null
           email: string | null
           id: string
           last_purchase_at: string | null
@@ -1162,16 +1305,23 @@ export type Database = {
           phone: string | null
           phone_canonical: string | null
           purchase_count: number
+          source: string | null
           updated_at: string
           wa_id: string | null
         }
         Insert: {
+          ad_referral?: Json | null
+          ad_referral_at?: string | null
           classification?: string
           classification_source?: string
           classified_at?: string | null
           company?: string | null
           created_at?: string
           custom_fields?: Json
+          delivery_address?: string | null
+          delivery_lat?: number | null
+          delivery_lng?: number | null
+          delivery_references?: string | null
           email?: string | null
           id?: string
           last_purchase_at?: string | null
@@ -1180,16 +1330,23 @@ export type Database = {
           phone?: string | null
           phone_canonical?: string | null
           purchase_count?: number
+          source?: string | null
           updated_at?: string
           wa_id?: string | null
         }
         Update: {
+          ad_referral?: Json | null
+          ad_referral_at?: string | null
           classification?: string
           classification_source?: string
           classified_at?: string | null
           company?: string | null
           created_at?: string
           custom_fields?: Json
+          delivery_address?: string | null
+          delivery_lat?: number | null
+          delivery_lng?: number | null
+          delivery_references?: string | null
           email?: string | null
           id?: string
           last_purchase_at?: string | null
@@ -1198,6 +1355,7 @@ export type Database = {
           phone?: string | null
           phone_canonical?: string | null
           purchase_count?: number
+          source?: string | null
           updated_at?: string
           wa_id?: string | null
         }
@@ -1522,6 +1680,7 @@ export type Database = {
           direction: string
           error: string | null
           id: string
+          location: Json | null
           media_error: string | null
           media_filename: string | null
           media_id: string | null
@@ -1531,6 +1690,7 @@ export type Database = {
           media_status: string | null
           sender_id: string | null
           sent_by_agent: boolean
+          shared_contacts: Json | null
           status: string
           type: string
           wa_message_id: string | null
@@ -1546,6 +1706,7 @@ export type Database = {
           direction: string
           error?: string | null
           id?: string
+          location?: Json | null
           media_error?: string | null
           media_filename?: string | null
           media_id?: string | null
@@ -1555,6 +1716,7 @@ export type Database = {
           media_status?: string | null
           sender_id?: string | null
           sent_by_agent?: boolean
+          shared_contacts?: Json | null
           status?: string
           type?: string
           wa_message_id?: string | null
@@ -1570,6 +1732,7 @@ export type Database = {
           direction?: string
           error?: string | null
           id?: string
+          location?: Json | null
           media_error?: string | null
           media_filename?: string | null
           media_id?: string | null
@@ -1579,6 +1742,7 @@ export type Database = {
           media_status?: string | null
           sender_id?: string | null
           sent_by_agent?: boolean
+          shared_contacts?: Json | null
           status?: string
           type?: string
           wa_message_id?: string | null
@@ -2205,6 +2369,7 @@ export type Database = {
           id: string | null
           is_inactive: boolean | null
           kind: string | null
+          last_inbound_at: string | null
           last_interaction: string | null
           last_purchase_at: string | null
           name: string | null
@@ -2213,6 +2378,7 @@ export type Database = {
           related_count: number | null
           related_names: string[] | null
           role_ids: string[] | null
+          source: string | null
           tag_ids: string[] | null
           wa_id: string | null
         }
@@ -2577,6 +2743,15 @@ export type Database = {
           name: string
         }[]
       }
+      import_contacts: {
+        Args: {
+          p_default_classification?: string
+          p_dry_run?: boolean
+          p_mode?: string
+          p_rows: Json
+        }
+        Returns: Json
+      }
       link_contact_to_company: {
         Args: {
           p_company_id: string
@@ -2587,6 +2762,14 @@ export type Database = {
       }
       normalize_phone: { Args: { p: string }; Returns: string }
       notes_backfill_status: { Args: { p_agent_key: string }; Returns: Json }
+      propose_delivery_suggestion: {
+        Args: { p_contact_id: string; p_note_id: string; p_text: string }
+        Returns: undefined
+      }
+      record_contact_referral: {
+        Args: { p_contact_id: string; p_referral: Json }
+        Returns: undefined
+      }
       register_purchase: {
         Args: {
           p_date?: string
@@ -2609,6 +2792,40 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "entity_notes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      resolve_delivery_suggestion: {
+        Args: { p_accept: boolean; p_id: string }
+        Returns: {
+          ad_referral: Json | null
+          ad_referral_at: string | null
+          classification: string
+          classification_source: string
+          classified_at: string | null
+          company: string | null
+          created_at: string
+          custom_fields: Json
+          delivery_address: string | null
+          delivery_lat: number | null
+          delivery_lng: number | null
+          delivery_references: string | null
+          email: string | null
+          id: string
+          last_purchase_at: string | null
+          name: string | null
+          notes: string | null
+          phone: string | null
+          phone_canonical: string | null
+          purchase_count: number
+          source: string | null
+          updated_at: string
+          wa_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "contacts"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -2712,6 +2929,7 @@ export type Database = {
           p_offset?: number
           p_role_ids?: string[]
           p_search?: string
+          p_source?: string
           p_tag_ids?: string[]
         }
         Returns: {
@@ -2723,6 +2941,7 @@ export type Database = {
           id: string | null
           is_inactive: boolean | null
           kind: string | null
+          last_inbound_at: string | null
           last_interaction: string | null
           last_purchase_at: string | null
           name: string | null
@@ -2731,6 +2950,7 @@ export type Database = {
           related_count: number | null
           related_names: string[] | null
           role_ids: string[] | null
+          source: string | null
           tag_ids: string[] | null
           wa_id: string | null
         }[]
@@ -2778,6 +2998,40 @@ export type Database = {
           p_reason?: string
         }
         Returns: undefined
+      }
+      set_delivery_location_from_message: {
+        Args: { p_message_id: string }
+        Returns: {
+          ad_referral: Json | null
+          ad_referral_at: string | null
+          classification: string
+          classification_source: string
+          classified_at: string | null
+          company: string | null
+          created_at: string
+          custom_fields: Json
+          delivery_address: string | null
+          delivery_lat: number | null
+          delivery_lng: number | null
+          delivery_references: string | null
+          email: string | null
+          id: string
+          last_purchase_at: string | null
+          name: string | null
+          notes: string | null
+          phone: string | null
+          phone_canonical: string | null
+          purchase_count: number
+          source: string | null
+          updated_at: string
+          wa_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "contacts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       update_agent_settings: {
         Args: {

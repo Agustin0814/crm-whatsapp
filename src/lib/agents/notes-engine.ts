@@ -185,8 +185,8 @@ export async function executeNotesRun(supabase: AdminClient, run: Run): Promise<
   const manual = run.trigger_kind === "manual";
   if (!agent.enabled && !manual) return { acted: false, reason: "Agente apagado" };
   if (locked.kill_switch) {
-    if (run.trigger_kind === "backfill") await stopBackfill(supabase, agent.id, "Detenido por el proveedor (kill switch)");
-    return log(supabase, run, locked, { outcome: "blocked_by_limit", reason: "Detenido por el proveedor (kill switch)" });
+    if (run.trigger_kind === "backfill") await stopBackfill(supabase, agent.id, "Detenido por el superadmin (kill switch)");
+    return log(supabase, run, locked, { outcome: "blocked_by_limit", reason: "Detenido por el superadmin (kill switch)" });
   }
   const config = parseNotesConfig(agent.config, {
     daily_cap_max: locked.daily_cap_ceiling,
@@ -375,6 +375,7 @@ export async function executeNotesRun(supabase: AdminClient, run: Run): Promise<
     return conflict(ctx, false);
   }
   if (hasMore) await continueLater(ctx);
+  await proposeDeliveryAddress(ctx, validated.notes);
 
   const parts = [
     saved.notesCreated ? `${saved.notesCreated} nota${saved.notesCreated === 1 ? "" : "s"}` : "sin notas nuevas",
@@ -411,6 +412,24 @@ type PassContext = {
   last: { id: string; created_at: string };
   handled: number;
 };
+
+/**
+ * Sugerencia para la sección «Entrega» de la ficha: la primera nota de tipo
+ * «entrega» de la pasada. La base la ignora si el contacto ya tiene dirección
+ * o una sugerencia pendiente: nunca sobrescribe nada. No bloquea la pasada.
+ */
+async function proposeDeliveryAddress(ctx: PassContext, notes: { kind: string; text: string }[]): Promise<void> {
+  const delivery = notes.find((n) => n.kind === "entrega");
+  if (!delivery) return;
+  const text = delivery.text.replace(/^\s*entrega\s*:\s*/i, "").trim();
+  if (!text) return;
+  const { error } = await ctx.supabase.rpc("propose_delivery_suggestion", {
+    p_contact_id: ctx.contactId,
+    p_note_id: null as unknown as string,
+    p_text: text,
+  });
+  if (error) console.error("[agents] No se pudo proponer la dirección de entrega");
+}
 
 /** Guarda notas, resumen y marca en UNA transacción (save_notes_pass). */
 async function savePass(

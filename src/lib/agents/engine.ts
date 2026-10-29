@@ -299,7 +299,7 @@ async function executeRun(supabase: AdminClient, run: Run): Promise<RunResult> {
   const locked = agent?.agent_locked_config ?? null;
   if (!agent || !locked) return { acted: false, reason: "Agente no encontrado" };
   if (!agent.enabled) return skip(supabase, run, "Agente apagado", false);
-  if (locked.kill_switch) return block(supabase, run, "Detenido por el proveedor (kill switch)");
+  if (locked.kill_switch) return block(supabase, run, "Detenido por el superadmin (kill switch)");
 
   const limits: AgentLimits = {
     ...DEFAULT_LIMITS,

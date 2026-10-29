@@ -1,11 +1,11 @@
 ---
 titulo: Agentes de IA (página Agentes)
-temas: agentes, asistentes, encender, apagar, activo, inactivo, modo, sugerencia, automático, configurar, registro de actividad, tarjetas de uso, detenido por el proveedor
+temas: agentes, asistentes, encender, apagar, activo, inactivo, modo, sugerencia, automático, configurar, registro de actividad, tarjetas de uso, detenido por el superadmin
 ---
 En **Agentes** están los asistentes de IA del CRM: el **Asistente de respuestas**, el **Asistente de notas** y el **Asistente del sistema**.
 
 ## Encender o apagar
-En la lista, el control **Estado** cambia entre **Activo** e **Inactivo**. Solo un administrador puede cambiarlo. Si dice «Detenido por el proveedor», el proveedor lo pausó y no se puede encender desde aquí.
+En la lista, el control **Estado** cambia entre **Activo** e **Inactivo**. Solo un administrador puede cambiarlo. Si dice «Detenido por el superadmin», el superadmin lo pausó y no se puede encender desde aquí.
 
 ## Modo (solo el Asistente de respuestas)
 - **Sugerencia** (por defecto): el asistente prepara la respuesta y una persona la envía, la edita o la descarta.

@@ -245,7 +245,14 @@ export function ChatView({
             </p>
           </div>
         )}
-        <MessageList messages={messages} events={events} contact={contact} loading={loadingMessages} now={now} />
+        <MessageList
+          messages={messages}
+          events={events}
+          contact={contact}
+          loading={loadingMessages}
+          now={now}
+          onContactChanged={onReloadContact}
+        />
         {/* data-assistant-avoid: la burbuja del Asistente del sistema se coloca por encima. */}
         <div data-assistant-avoid className="shrink-0">
           <AgentSuggestionBanner conversationId={conversation.id} windowOpen={windowOpen} />

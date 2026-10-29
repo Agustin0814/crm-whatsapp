@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (profile?.role !== "superadmin") return NextResponse.json({ error: "Solo el proveedor puede usar el probador" }, { status: 403 });
+  if (profile?.role !== "superadmin") return NextResponse.json({ error: "Solo el superadmin puede usar el probador" }, { status: 403 });
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const agentKey = typeof body.agentKey === "string" && body.agentKey ? body.agentKey : "responder";

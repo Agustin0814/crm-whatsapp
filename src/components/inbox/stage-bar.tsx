@@ -241,6 +241,18 @@ function ToDeliveryDialog({
             ) : (
               <>
                 <div>
+                  <p className="text-xs font-medium text-texto-suave">Entrega</p>
+                  <p className="whitespace-pre-wrap">
+                    {conversation.contact?.delivery_address?.trim() || "Sin dirección de entrega en la ficha."}
+                  </p>
+                  {conversation.contact?.delivery_references?.trim() && (
+                    <p className="text-xs whitespace-pre-wrap text-texto-suave">{conversation.contact.delivery_references}</p>
+                  )}
+                  {conversation.contact?.delivery_lat != null && (
+                    <p className="text-xs text-texto-suave">Con ubicación en el mapa</p>
+                  )}
+                </div>
+                <div>
                   <p className="text-xs font-medium text-texto-suave">Resumen del cliente</p>
                   <p className="whitespace-pre-wrap">{summary?.summary?.trim() || "Sin resumen todavía."}</p>
                   {counters.length > 0 && (
